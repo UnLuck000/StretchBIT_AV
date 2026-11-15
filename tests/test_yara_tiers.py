@@ -52,11 +52,21 @@ def test_confirm_alone_is_check_not_threat(confirm_list, monkeypatch, tmp_path):
     assert classify(reason)[1] == "Проверить: YARA (вторая очередь): Impacket"
     # подпись действительна — вторая очередь не учитывается
     assert _analyze(monkeypatch, tmp_path, [Match("Impacket")], signature="valid") is None
-    # библиотека подписанной программы — тоже
-    monkeypatch.setattr(engine, "_partner", lambda path: ("x", "Program"))
-    monkeypatch.setattr(engine, "inspect_signature", lambda path: SimpleNamespace(status="unsigned"))
-    p = tmp_path / "a.dll"
-    assert engine.analyze(p, rules=object(), threshold=60, revocation=False) is None
+    # библиотека подписанной программы — тоже «проверить»: подпись соседа замену не исключает
+    reason = _analyze_partner(monkeypatch, tmp_path, [Match("Impacket")])
+    assert reason == engine.CHECK_PREFIX + "Impacket [библиотека подписанной программы app.exe]"
+    # эвристику сняла подпись соседа, но вторая очередь совпала — тоже «проверить»
+    reason = _analyze_partner(monkeypatch, tmp_path, [Match("Impacket")], heuristic_score=90)
+    assert reason.startswith(engine.CHECK_PREFIX) and engine.reason_level(reason) == "suspicious"
+    # без второй очереди библиотека подписанной программы по-прежнему чистая
+    assert _analyze_partner(monkeypatch, tmp_path, [], heuristic_score=90) is None
+
+
+def _analyze_partner(monkeypatch, tmp_path, matches, heuristic_score=0):
+    _analyze(monkeypatch, tmp_path, [], heuristic_score)   # заглушки слоёв
+    monkeypatch.setattr(engine, "match_details", lambda rules, path, data=None: list(matches))
+    monkeypatch.setattr(engine, "_partner", lambda path: ("app.exe", "импорт"))
+    return engine.analyze(tmp_path / "a.dll", rules=object(), threshold=60, revocation=False)
 
 
 def test_confirm_raises_heuristic_to_threat(confirm_list, monkeypatch, tmp_path):

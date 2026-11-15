@@ -369,17 +369,20 @@ def build_report(path: Path, signatures: set[str], rules, whitelist: set[str],
         verdict = (f"Угроза: эвристика PE ({heuristics.score} баллов) подтверждена правилами "
                    "YARA второй очереди: " + ", ".join(confirm))
         level = "threat"
-    elif confirm and heuristics.score < threshold and signature.status != "valid" \
-            and not partner:
+    elif confirm and signature.status != "valid":
+        # первая очередь ничего не нашла (или её сняла подпись соседней программы): вторая —
+        # «проверить»; библиотека подписанной программы — тоже: подмену подпись соседа не
+        # исключает
+        whose = (f" Файл — библиотека подписанной программы ({partner[1]}): подозрение ниже, "
+                 "но замену библиотеки это не исключает." if partner else "")
         verdict = ("Проверить: совпали только правила YARA второй очереди (" + ", ".join(confirm)
-                   + "), а подписи нет или она недействительна. Это не угроза: такие правила "
-                   "дают ложные срабатывания и сами по себе находку не делают")
+                   + "), а у самого файла подписи нет или она недействительна. Это не угроза: "
+                   "такие правила дают ложные срабатывания и сами по себе находку не делают."
+                   + whose)
         level = "suspicious"
     elif confirm and heuristics.score < threshold:
         verdict = ("Угроз не найдено. Правила YARA второй очереди (" + ", ".join(confirm)
-                   + ") не учитываются: " + ("подпись действительна" if
-                                             signature.status == "valid" else
-                                             f"файл — часть подписанной программы ({partner[1]})"))
+                   + ") не учитываются: подпись файла действительна")
         level = "clean"
     elif heuristics.score >= threshold:
         if signature.status == "valid":

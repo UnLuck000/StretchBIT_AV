@@ -226,8 +226,8 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
                 return None  # подписан доверенным издателем: эвристику не применяем
             if partner is False:
                 partner = _partner(p)
-            if partner:
-                return None  # библиотека подписанной программы из той же папки
+            if partner:  # библиотека подписанной программы из той же папки
+                return _check_reason(confirm, partner) if confirm else None
             note = {UNSIGNED: " [нет подписи]", INVALID: " [подпись недействительна]",
                     REVOKED: " [сертификат отозван]"}
             if confirm:  # эвристика + правило второй очереди — угроза
@@ -236,14 +236,23 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
             return "Heuristic: " + report.summary() + note.get(sig.status, "")
     if confirm:
         # первая очередь ничего не нашла: совпадение второй — «проверить», не угроза; при
-        # действительной подписи (или библиотеке подписанной программы) — не учитывается
+        # действительной подписи самого файла — не учитывается. Библиотека подписанной
+        # программы — тоже «проверить»: подпись соседа снимает подозрение, но подмену
+        # библиотеки не исключает (пожелание 15.11.2026: проверку довести до конца)
         sig = sig or _trusted_signature(p, inspect_signature(p), revocation)
         if sig.status != VALID:
             if partner is False:
                 partner = _partner(p)
-            if not partner:
-                return CHECK_PREFIX + ", ".join(confirm)
+            return _check_reason(confirm, partner)
     return None
+
+
+def _check_reason(confirm: list[str], partner) -> str:
+    """«Проверить» по правилам второй очереди; partner — подписанная программа рядом."""
+    name = partner[0] if isinstance(partner, tuple) and partner else ""  # (файл, как связаны)
+    note = f" [библиотека подписанной программы {name}]" if name else (
+        " [библиотека подписанной программы]" if partner else "")
+    return CHECK_PREFIX + ", ".join(confirm) + note
 
 
 def scan_tree(root: Path, signatures: set[str], rules=None,
