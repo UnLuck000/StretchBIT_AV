@@ -150,24 +150,22 @@ def parse_tasklist(text: str) -> tuple[set[int], int]:
 
 
 def service_info() -> tuple[set[int], int]:
-    """(PID процессов со службами, PID службы «Планировщик заданий»). Обновляется раз в 30 секунд
-    одним быстрым вызовом tasklist вместо сотни запросов к службам."""
+    """(PID процессов со службами, PID службы «Планировщик заданий»). Обновляется раз в 30
+    секунд одним вызовом EnumServicesStatusExW. Раньше — tasklist /svc: на Celeron он не
+    укладывался в 20 с (22 раза за вечер в журнале 15.11.2026)."""
     global _svc_cache
     now = time.monotonic()
     if now - _svc_cache[0] < 30:
         return _svc_cache[1], _svc_cache[2]
     pids, schedule_pid = _svc_cache[1], _svc_cache[2]  # при сбое остаются прежние значения
     try:
-        result = subprocess.run(["tasklist", "/svc", "/fo", "csv", "/nh"],
-                                capture_output=True, timeout=20, creationflags=NO_WINDOW)
-        try:
-            text = result.stdout.decode("oem", "replace")
-        except LookupError:  # не Windows
-            text = result.stdout.decode("utf-8", "replace")
-        parsed = parse_tasklist(text)
-        if parsed[0]:
-            pids, schedule_pid = parsed
-    except (OSError, subprocess.SubprocessError):
+        from scanner.drivers import active_services
+        services = active_services(0x30)  # SERVICE_WIN32
+        if services:
+            pids = {pid for _, pid in services if pid}
+            schedule_pid = next((pid for name, pid in services if name.lower() == "schedule"),
+                                0)
+    except OSError:
         pass
     _svc_cache = (now, pids, schedule_pid)
     return pids, schedule_pid

@@ -1,4 +1,4 @@
-"""«Почему нет интернета?» (vpn/netdiag.py): разбор фильтров WFP и чужие TUN-клиенты."""
+"""«Проверить исправность интернета» (vpn/netdiag.py): разбор фильтров WFP и чужие TUN-клиенты."""
 from types import SimpleNamespace
 
 from vpn import netdiag

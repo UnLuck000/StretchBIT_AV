@@ -234,10 +234,11 @@ class ENUM_SERVICE_STATUS_PROCESSW(ctypes.Structure):
                 ("dwServiceFlags", wintypes.DWORD)]
 
 
-def running_driver_services() -> set[str]:
-    """Имена запущенных служб-драйверов (нижний регистр). Права администратора не нужны."""
+def active_services(kind: int) -> list[tuple[str, int]]:
+    """Запущенные службы вида kind (0xB — драйверы, 0x30 — службы Win32): [(имя, PID)].
+    Один вызов EnumServicesStatusExW, права администратора не нужны."""
     if sys.platform != "win32":
-        return set()
+        return []
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     advapi.OpenSCManagerW.restype = ctypes.c_void_p
     advapi.EnumServicesStatusExW.argtypes = [
@@ -247,21 +248,26 @@ def running_driver_services() -> set[str]:
     advapi.CloseServiceHandle.argtypes = [ctypes.c_void_p]
     scm = advapi.OpenSCManagerW(None, None, 0x0004)  # SC_MANAGER_ENUMERATE_SERVICE
     if not scm:
-        return set()
+        return []
     try:
         needed, count, resume = wintypes.DWORD(), wintypes.DWORD(), wintypes.DWORD(0)
-        # SC_ENUM_PROCESS_INFO, SERVICE_DRIVER (0xB), SERVICE_ACTIVE (1)
-        advapi.EnumServicesStatusExW(scm, 0, 0xB, 1, None, 0, ctypes.byref(needed),
+        # SC_ENUM_PROCESS_INFO, SERVICE_ACTIVE (1)
+        advapi.EnumServicesStatusExW(scm, 0, kind, 1, None, 0, ctypes.byref(needed),
                                      ctypes.byref(count), ctypes.byref(resume), None)
-        buf = ctypes.create_string_buffer(needed.value + 4096)
+        buf = ctypes.create_string_buffer(needed.value + 8192)
         resume = wintypes.DWORD(0)
-        if not advapi.EnumServicesStatusExW(scm, 0, 0xB, 1, buf, len(buf), ctypes.byref(needed),
+        if not advapi.EnumServicesStatusExW(scm, 0, kind, 1, buf, len(buf), ctypes.byref(needed),
                                             ctypes.byref(count), ctypes.byref(resume), None):
-            return set()
+            return []
         items = ctypes.cast(buf, ctypes.POINTER(ENUM_SERVICE_STATUS_PROCESSW))
-        return {items[i].lpServiceName.lower() for i in range(count.value)}
+        return [(items[i].lpServiceName, items[i].dwProcessId) for i in range(count.value)]
     finally:
         advapi.CloseServiceHandle(scm)
+
+
+def running_driver_services() -> set[str]:
+    """Имена запущенных служб-драйверов (нижний регистр). Права администратора не нужны."""
+    return {name.lower() for name, _ in active_services(0xB)}
 
 
 def loaded_modules() -> set[str]:

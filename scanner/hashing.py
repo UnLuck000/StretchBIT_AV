@@ -127,6 +127,28 @@ class HashDB:
         return len(self) > 0
 
 
+def count_hashes(sig_dir: Path) -> int:
+    """Сколько хэшей в текстовых базах (hashes.txt и feeds/*.txt) — для главной. Считаются
+    строки, базы в память не загружаются: раньше для одного числа строилась вся HashDB,
+    и на Celeron счётчик «Базы сигнатур» появлялся очень долго (комментарий 15.11.2026).
+    Повторы между базами не вычитаются: число приблизительное."""
+    files = [sig_dir / "hashes.txt"]
+    feeds = sig_dir / "feeds"
+    if feeds.is_dir():
+        files += sorted(feeds.glob("*.txt"))
+    total = 0
+    for path in files:
+        try:
+            with open(path, "rb") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith(b"#"):
+                        total += 1
+        except OSError:
+            continue
+    return total
+
+
 def load_all_signatures(sig_dir: Path) -> HashDB:
     """hashes.txt плюс все базы из signatures/feeds/ (*.txt и двоичные *.bin)."""
     db = HashDB()

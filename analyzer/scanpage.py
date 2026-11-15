@@ -17,6 +17,12 @@ def _folder_done(*_):
     features.end_if_active("scan.folder", True)
 
 
+
+def documents_dir() -> str:
+    """Папка «Документы» пользователя (с учётом переноса в OneDrive и т. п.)."""
+    from PySide6.QtCore import QStandardPaths
+    return QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+
 class ScanPage(QWidget):
     status = Signal(str, int)
     quarantine_changed = Signal()
@@ -87,9 +93,11 @@ class ScanPage(QWidget):
             self.scan(path)
 
     def _start_dir(self) -> str:
+        """Папка, с которой открываются «Файл...» и «Папка...»: текущая проверенная, иначе
+        «Документы» (раньше — рабочая папка, то есть папка самой программы)."""
         if self._current:
             return self._current if os.path.isdir(self._current) else os.path.dirname(self._current)
-        return ""
+        return documents_dir()
 
     def scan_clicked(self) -> None:
         path = self.path_edit.text().strip().strip('"')

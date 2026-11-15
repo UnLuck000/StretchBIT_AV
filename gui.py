@@ -141,6 +141,7 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
     amsi_event = Signal(object)             # AMSI: заблокированный или подозрительный скрипт
     pslog_event = Signal(object)            # журнал PowerShell 4104: опасный блок скрипта
     memwatch_event = Signal(str, object)    # память процессов: вид, сведения (scanner/memwatch)
+    service_status_ready = Signal(object)    # ответ службы на status (dict) или ошибка (str)
     release_found = Signal(object, str, bool)  # updatecheck.Release | None, ошибка, вручную
     release_downloaded = Signal(object, str)   # путь установщика | None, ошибка
     systool_failed = Signal(object)         # diag.systool.Failure: системная программа не сработала
@@ -698,9 +699,11 @@ if __name__ == "__main__":
     from ui import screenfit
     _ui_scale = screenfit.apply_scale()  # экран меньше Full HD — всё мельче (до QApplication)
     app = QApplication(sys.argv)
+    cfg.store()  # общий QSettings — в главном потоке, до фоновых потоков (ui/settings.py)
     from diag import crash, edition, resources, uiaudit
     crash.install_qt_messages()
     _freeze_watch = crash.FreezeWatch()
+    _main_gc = crash.MainThreadGC()  # сборщик мусора — только в главном потоке (вылеты 15.11)
     uiaudit.install(app)
     screenfit.install(app)  # окно при показе — не больше экрана
     if _ui_scale != 1.0:

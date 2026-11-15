@@ -80,8 +80,24 @@ def _winsxs() -> str:
 
 def own_dirs() -> set[str]:
     """Папка самой программы: в ней правила YARA и базы (совпадают сами с собой), карантин
-    и кэш скомпилированных правил."""
-    return {os.path.normcase(str(Path(__file__).resolve().parent.parent))}
+    и кэш скомпилированных правил. И папки установки обеих версий и их данные в ProgramData
+    — только закрытые от записи: 15.11.2026 проверка из исходников прошла по
+    C:\\Program Files\\StretchBIT-test и «нашла» 515 файлов правил .yar."""
+    import ownproc
+    found = {os.path.normcase(str(Path(__file__).resolve().parent.parent))}
+    for folder in ownproc.install_dirs():
+        if ownproc._dir_closed(folder):
+            found.add(folder.rstrip("\\/"))
+    base = os.environ.get("ProgramData", "")
+    for name in ownproc.EDITION_DIRS if base else ():
+        folder = os.path.join(base, name)  # копии списков доверия, AMSI, кэш YARA
+        try:
+            import winacl
+            if os.path.isdir(folder) and winacl.admin_only(folder)[0]:
+                found.add(os.path.normcase(folder))
+        except Exception:  # noqa: BLE001 — права не узнать: папка проверяется как обычно
+            continue
+    return found
 
 
 # ---------- диски ----------

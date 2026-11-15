@@ -9,6 +9,7 @@
 В релизной версии ничего из этого не создаётся (diag.edition.is_test()).
 """
 import json
+import sys
 import time
 
 from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal
@@ -49,9 +50,20 @@ def features_for(area: str) -> list[str]:
     return [f.id for f in features.FEATURES.values() if f.area == area]
 
 
+def _this_pc() -> str:
+    """Описание этого ПК так же, как в отметке «Исправно» (features.mark_ok)."""
+    from diag import specs
+    return features._pc_short(specs)
+
+
 def status(fid: str) -> tuple[str, str]:
     """(цвет точки, подсказка)."""
     ref = features.baseline().get(fid)
+    if ref and getattr(sys, "frozen", False) and ref.get("pc") != _this_pc():
+        # в собранной программе зелёные — только отмеченные на ЭТОМ компьютере: эталон из
+        # сборки (отметки разработчика) по-прежнему сверяется в журнале, но точки им не
+        # красятся (комментарий 15.11.2026: «уже проставлены отметки»)
+        ref = None
     last = features.runs().get(fid)
     if last and last.get("ok") is False:
         return "#e05252", "Последний запуск — с ошибкой: " + "; ".join(last.get("errors") or [])
@@ -107,6 +119,13 @@ class CommentDialog(QDialog):
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+    def keyPressEvent(self, event):
+        """Esc окно НЕ закрывает (комментарий 15.11.2026): случайное нажатие стирало
+        написанный комментарий. Закрыть — «Cancel» или крестиком."""
+        if event.key() == Qt.Key.Key_Escape:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _save(self):
         text = self.text.toPlainText().strip()
@@ -319,12 +338,11 @@ class WindowAttacher(QObject):
     def __init__(self, app):
         super().__init__(app)
         self._done: set[int] = set()
-        app.installEventFilter(self)
+        from ui import apphooks  # общий фильтр приложения (ui/apphooks.py)
+        apphooks.on_show(self._on_show)
 
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Show and isinstance(watched, QWidget) and watched.isWindow():
-            name = type(watched).__name__
-            if features_for(name) and id(watched) not in self._done:
-                self._done.add(id(watched))
-                CornerPanel(watched, name)
-        return False
+    def _on_show(self, watched) -> None:
+        name = type(watched).__name__
+        if features_for(name) and id(watched) not in self._done:
+            self._done.add(id(watched))
+            CornerPanel(watched, name)

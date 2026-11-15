@@ -258,7 +258,10 @@ def add_program_verdicts(report: DriveReport, results) -> None:
         if error is not None or not reason:
             continue
         old = known.get(path)
-        finding = Finding(path, "program", "threat", "Сканер: " + reason, "", "quarantine")
+        from scanner.engine import reason_level
+        # эвристика и слабые правила — «подозрительно»: флешка лечится сама только от угроз
+        finding = Finding(path, "program", reason_level(reason), "Сканер: " + reason, "",
+                          "quarantine")
         if old is not None:
             report.findings[report.findings.index(old)] = finding
         else:

@@ -721,6 +721,11 @@ class ProcessWindow(QMainWindow):
                 return p, None
             if kernel_process(p.pid, p.ppid, p.exe):
                 return p, MemResult("kernel")
+            import ownproc
+            if ownproc.is_own_process(p.pid, p.exe or None):
+                # служба и окно StretchBIT: в их памяти правила YARA — совпали бы сами с собой
+                # (служба была красной «Найдено: Pulsar_RAT...», Windows 10, 15.11.2026)
+                return p, MemResult("own")
             # системный процесс без изменений с прошлой проверки — не сканируется (memcache)
             cached, fp = (None, None) if force else memcache.lookup(p, rules_key)
             if cached is not None:

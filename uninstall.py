@@ -110,8 +110,12 @@ def close_running(folder: Path) -> int:
 def steps(folder: Path, test: bool, wipe: bool = True,
           silent: bool = False) -> list[tuple[str, Callable[[], object]]]:
     """silent — вызов из деинсталлятора Inno Setup: ярлыки и запись «Приложения» он
-    удаляет сам."""
+    удаляет сам.
+    Другая версия установлена — общее с ней не трогается: папка ловушек «!SBIT — файлы-ловушки»,
+    сеансы ETW sbit-*, провайдер AMSI, правила брандмауэра «SBIT» (15.11.2026 удаление релизной
+    стёрло ловушки, и защита тестовой подняла тревогу «шифровальщик» на _unins.tmp)."""
     from ui import settings as cfg
+    shared = _other_installed(test)
 
     def vpn_restore():
         from vpn import dnsguard, killswitch, procguard, xray
@@ -121,24 +125,29 @@ def steps(folder: Path, test: bool, wipe: bool = True,
         dnsguard.recover()
 
     def firewall():
+        if shared:
+            return  # группы правил общие с другой версией
         groups = FIREWALL_GROUPS if wipe else KILLSWITCH_GROUPS  # kill switch — всегда
         _powershell("foreach ($g in ($env:FW_GROUPS -split ',')) { "
                     "Remove-NetFirewallRule -Group $g -ErrorAction SilentlyContinue }",
                     {"FW_GROUPS": ",".join(groups)})
 
     def etw():
+        if shared:
+            return  # сеансы с теми же именами ведёт служба другой версии
         for name in ETW_SESSIONS:
             subprocess.run(["logman", "stop", name, "-ets"], capture_output=True,
                            creationflags=CREATE_NO_WINDOW)
 
     def amsi_provider():
         from scanner import amsi
-        if amsi.registered():
+        if amsi.registered() and not shared:  # провайдер общий у обеих версий
             amsi.uninstall()  # иначе Windows грузила бы библиотеку и после удаления
 
     def decoys():
         from toolbox import decoys as d
-        d.remove_all()
+        if not shared:  # папка ловушек общая: другая версия следит за ней
+            d.remove_all()
 
     def autostart():
         if cfg.autostart_current():  # задание запускает именно эту копию

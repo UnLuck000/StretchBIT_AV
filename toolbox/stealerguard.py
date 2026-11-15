@@ -279,7 +279,7 @@ class StealerGuard:
         if pid in (0, 4) or name in ALWAYS_TRUSTED:
             return True
         import ownproc
-        if ownproc.is_program(pid, exe or None):
+        if ownproc.is_own_process(pid, exe or None):  # и другая версия программы
             return True  # сама программа: окно («Расширения»), служба, проверка дисков
         if not exe:
             return True  # защищённый системный процесс: путь не узнать

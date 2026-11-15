@@ -8,7 +8,11 @@
   из исходников): всё, что разработчик исключил при тестировании, попадает в релиз.
   build_release.py перед сборкой вливает сюда исключения из установленной тестовой версии;
 • signatures/overrides.json — только этот компьютер: сюда пишет релизная версия.
-Каждое изменение пишется в журнал действий с возможностью отмены."""
+Каждое изменение пишется в журнал действий с возможностью отмены.
+
+«confirm» (с 15.11.2026) — правила YARA второй очереди: в одиночку не делают находку, только
+подтверждают находку первой очереди (scanner/relations.rule_tier, engine.analyze). Туда —
+правила с ложными срабатываниями вместо отключения: отключённое не помогает совсем."""
 import json
 import os
 import threading
@@ -22,7 +26,7 @@ from recovery.journal import active_check, undo_op
 
 OVERRIDES_FILE = userdata.OVERRIDES_FILE  # папка конфигурации пользователя
 RELEASE_FILE = Path(__file__).resolve().parent.parent / "signatures" / "release_overrides.json"
-KINDS = ("hashes", "rules", "files")
+KINDS = ("hashes", "rules", "files", "confirm")
 
 _lock = threading.Lock()
 _cache: tuple[tuple, dict] | None = None  # (время изменения обоих файлов, данные)
@@ -210,6 +214,25 @@ def enable_rule(name: str) -> bool:
     return _remove("rules", name)
 
 
+def rule_confirm(name: str) -> bool:
+    """Правило второй очереди: только подтверждает находку других слоёв."""
+    return name in load()["confirm"]
+
+
+def confirm_rule(name: str, source: str = "", note: str = "") -> bool:
+    """Перевести правило во вторую очередь. False, если оно уже там."""
+    if rule_confirm(name):
+        return False
+    _add("confirm", name, {"source": source, "note": note, "added_at": _now()})
+    journal.log_action(f"Правило YARA {name} — во второй очереди (только подтверждает)",
+                       "fp_rule_unconfirm", {"rule": name})
+    return True
+
+
+def unconfirm_rule(name: str) -> bool:
+    return _remove("confirm", name)
+
+
 @active_check("fp_hash_restore")
 def _hash_active(d: dict) -> bool:
     return hash_ignored(d["hash"])
@@ -224,6 +247,17 @@ def _rule_active(d: dict) -> bool:
 def _undo_hash(d: dict) -> str:
     restore_hash(d["hash"])
     return f"Хэш снова в базе: {os.path.basename(d.get('path') or '') or d['hash'][:16]}"
+
+
+@active_check("fp_rule_unconfirm")
+def _confirm_active(d: dict) -> bool:
+    return rule_confirm(d["rule"])
+
+
+@undo_op("fp_rule_unconfirm")
+def _undo_confirm(d: dict) -> str:
+    unconfirm_rule(d["rule"])
+    return f"Правило {d['rule']} снова в первой очереди"
 
 
 @undo_op("fp_rule_enable")

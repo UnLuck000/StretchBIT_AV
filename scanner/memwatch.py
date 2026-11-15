@@ -209,6 +209,9 @@ class MemWatch:
         info = self._process_info(target)
         if info is None:  # уже завершился
             return
+        import ownproc
+        if ownproc.is_own_process(target, info.get("exe") or None):
+            return  # своя программа: в памяти правила YARA — совпали бы сами с собой
         source = self._process_info(creator) or self._from_story(creator)
         if source["name"].lower() in SKIP_CREATORS:
             return
@@ -321,6 +324,7 @@ class MemWatch:
 
     def _list_processes(self) -> list[dict]:
         from processmanager import ntsnap
+        import ownproc
         from processmanager.memscan import kernel_process
         me = os.getpid()
         found = []
@@ -328,8 +332,8 @@ class MemWatch:
             if raw.pid == me or raw.pid in (0, 4):
                 continue
             exe = self._exe(raw.pid)
-            if kernel_process(raw.pid, raw.ppid, exe):
-                continue
+            if kernel_process(raw.pid, raw.ppid, exe) or ownproc.is_own_process(raw.pid, exe):
+                continue  # своя программа: в памяти правила YARA — совпали бы сами с собой
             found.append({"pid": raw.pid, "ppid": raw.ppid, "name": raw.name, "exe": exe,
                           "created": raw.created})
         return found

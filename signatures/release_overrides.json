@@ -1,4 +1,16 @@
 {
+  "confirm": {
+    "Extract_MachineKey_SharePoint": {
+      "added_at": "2026-11-15T14:53:24",
+      "note": "ложное: настоящий System.Web.dll (.NET, Unity Mono) содержит MachineKeySection и HttpContext",
+      "source": "bartblaze"
+    },
+    "Impacket": {
+      "added_at": "2026-11-15T14:53:24",
+      "note": "ложное: любая строка impacket.* — в плагине Python для PyCharm (intellij.python.community.impl.jar)",
+      "source": "bartblaze"
+    }
+  },
   "files": {
     "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f": {
       "added_at": "2026-11-08T21:19:59",

@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 
 from scanner.media import EXECUTABLE_EXTS
-from scanner.relations import weak_match
+from scanner.relations import STRONG, rule_tier
 from scanner.yara_engine import match_details
 
 ARCHIVE_LIMIT = 64 * 1024 * 1024
@@ -98,7 +98,8 @@ def inspect(path: Path, data: bytes | None, rules) -> tuple[str | None, list[tup
         hashes.append((name, hashlib.sha256(body).hexdigest(),
                        hashlib.md5(body, usedforsecurity=False).hexdigest(), len(body)))
         if rules is not None:
-            strong = [m for m in match_details(rules, Path(name), data=body) if not weak_match(m)]
+            strong = [m for m in match_details(rules, Path(name), data=body)
+                      if rule_tier(m) == STRONG]
             if strong:
                 return ("YARA: " + ", ".join(m.rule for m in strong) +
                         f" (в архиве: {name})"), hashes

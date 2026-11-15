@@ -308,6 +308,9 @@ def builtin_rules() -> dict[str, list[str]]:
 
 
 # ================================ окно ================================
+NETDIAG_TITLE = "Проверить исправность интернета"
+
+
 class VpnWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -375,6 +378,7 @@ class VpnWindow(QDialog):
 
     def _profile_buttons(self) -> QHBoxLayout:
         row = QHBoxLayout()
+        row.setSpacing(6)
         for text, slot, tip in (("Вставить...", self._paste, "Ссылка vless:// или текст"),
                                 ("Импорт файла...", self._import, ".conf или .ovpn"),
                                 ("Переименовать", self._rename, ""),
@@ -383,6 +387,7 @@ class VpnWindow(QDialog):
             button.setToolTip(tip)
             button.clicked.connect(slot)
             row.addWidget(button)
+        row.addStretch()
         return row
 
     def _build_modern(self, body: QWidget) -> None:
@@ -413,19 +418,27 @@ class VpnWindow(QDialog):
         self.unblock_btn.setStyleSheet(f"color: {RED}; font-weight: 600;")
         self.unblock_btn.clicked.connect(self._release_block)
         texts.addWidget(self.unblock_btn, 0, Qt.AlignmentFlag.AlignLeft)
-        self.netdiag_btn = QPushButton("Почему нет интернета?")
-        self.netdiag_btn.setToolTip("Проверить связь, kill switch, брандмауэр, системный прокси "
-                                    "и чужие VPN-клиенты с туннелем (ничего не меняет)")
-        self.netdiag_btn.clicked.connect(self._run_netdiag)
-        texts.addWidget(self.netdiag_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        # настройки поменяли во время подключения: действуют со следующего (на месте прежней
+        # кнопки «Почему нет интернета?» — она теперь в «Подключении»)
+        self.restart_label = _label("", "")
+        self.restart_label.setStyleSheet(f"color: {ORANGE}; font-weight: 600;")
+        self.restart_label.hide()
+        texts.addWidget(self.restart_label)
+        # режим подключения — галочки здесь, а не отдельной карточкой в «Подключении»
+        self.chk_tun = QCheckBox("TUN: весь трафик компьютера через VPN (sing-box + Xray)")
+        self.chk_proxy = QCheckBox("Системный прокси: программы, которые слушаются прокси "
+                                   "Windows (браузеры)")
+        for box in (self.chk_tun, self.chk_proxy):
+            box.toggled.connect(lambda on, b=box: self._on_mode_box(b, on))
+            texts.addWidget(box)
+        self.mode_hint = _label("", "hint")
+        texts.addWidget(self.mode_hint)
         texts.addStretch()
         hrow.addLayout(texts, 1)
-        tiles = QGridLayout()
+        tiles = QVBoxLayout()
         tiles.setSpacing(10)
         self.tiles = {}
-        for i, (key, name) in enumerate((("time", "Время"), ("speed", "Скорость"),
-                                         ("rx", "Получено"), ("tx", "Отправлено"),
-                                         ("server", "Сервер"), ("ip", "Внешний IP"))):
+        for key, name in (("time", "Время подключения"), ("traffic", "Количество трафика")):
             tile, tl = _card()
             tl.setContentsMargins(12, 8, 12, 8)
             tl.setSpacing(2)
@@ -433,9 +446,10 @@ class VpnWindow(QDialog):
             value = _label("—", "tileValue", wrap=False)
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             tl.addWidget(value)
-            tile.setMinimumWidth(190)
-            tiles.addWidget(tile, i // 3, i % 3)
+            tile.setMinimumWidth(240)
+            tiles.addWidget(tile)
             self.tiles[key] = value
+        tiles.addStretch()
         hrow.addLayout(tiles)
         hl.addLayout(hrow)
         outer.addWidget(hero)
@@ -488,16 +502,31 @@ class VpnWindow(QDialog):
         layout = QVBoxLayout(page)
         # профиль: выбор, вставка, импорт, переименование, удаление
         card, cl = _card()
-        cl.addWidget(_label("Профиль", "title"))
-        prow = QHBoxLayout()
+        cl.addWidget(_label("Профили", "title"))
+        # список — таблицей (сервер, название, пинг); выбранная строка — текущий профиль.
+        # Скрытый cmb_profile остаётся хранилищем выбора: на нём построена остальная логика
         self.cmb_profile = QComboBox()
-        self.cmb_profile.setMinimumWidth(320)
+        self.cmb_profile.hide()
         self.cmb_profile.currentIndexChanged.connect(self._on_select)
-        prow.addWidget(self.cmb_profile, 1)
-        prow.addLayout(self._profile_buttons())
-        cl.addLayout(prow)
-        self.chk_auto = QCheckBox("Этот профиль подключать при запуске программы (если "
-                                  "включено «VPN при запуске» в настройках клиента)")
+        self.profile_table = QTableWidget(0, 3)
+        self.profile_table.setHorizontalHeaderLabels(["Сервер", "Название профиля", "Пинг"])
+        self.profile_table.verticalHeader().setVisible(False)
+        self.profile_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.profile_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.profile_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        header = self.profile_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.profile_table.setColumnWidth(0, 260)
+        self.profile_table.setMinimumHeight(150)
+        self.profile_table.setMaximumHeight(260)
+        self.profile_table.itemSelectionChanged.connect(self._on_table_select)
+        cl.addWidget(self.profile_table)
+        cl.addLayout(self._profile_buttons())
+        self.chk_auto = QCheckBox("При запуске программы подключать к выбранному профилю")
+        self.chk_auto.setToolTip("Вместе с программой VPN подключается к этому профилю "
+                                 "(отмечен может быть только один)")
         self.chk_auto.toggled.connect(self._on_auto)
         cl.addWidget(self.chk_auto)
         row = QHBoxLayout()
@@ -519,18 +548,6 @@ class VpnWindow(QDialog):
         self.engine_label = _label("", "hint")
         cl.addWidget(self.engine_label)
         layout.addWidget(card)
-        # режим: галочки TUN и системного прокси; обе сняты — только локальный прокси
-        card, cl = _card()
-        cl.addWidget(_label("Режим подключения", "title"))
-        self.chk_tun = QCheckBox("TUN: весь трафик компьютера через VPN (sing-box + Xray)")
-        self.chk_proxy = QCheckBox("Системный прокси: программы, которые слушаются прокси "
-                                   "Windows (браузеры)")
-        for box in (self.chk_tun, self.chk_proxy):
-            box.toggled.connect(lambda on, b=box: self._on_mode_box(b, on))
-            cl.addWidget(box)
-        self.mode_hint = _label("", "hint")
-        cl.addWidget(self.mode_hint)
-        layout.addWidget(card)
         # локальный прокси: виден, когда обе галочки сняты
         self.local_card, cl = _card()
         cl.addWidget(_label("Локальный прокси для программ", "title"))
@@ -544,10 +561,12 @@ class VpnWindow(QDialog):
             box = QCheckBox(f"{title}-прокси, порт:")
             box.setChecked(cfg.get(f"vpn/{kind}_enabled"))
             box.toggled.connect(lambda on, k=kind: cfg.set_(f"vpn/{k}_enabled", on))
+            box.toggled.connect(lambda _on: self._settings_changed())
             spin = QSpinBox()
             spin.setRange(1024, 65535)
             spin.setValue(cfg.get(f"vpn/{kind}_port"))
             spin.valueChanged.connect(lambda v, k=kind: cfg.set_(f"vpn/{k}_port", v))
+            spin.valueChanged.connect(lambda _v: self._settings_changed())
             form.addWidget(box, row, 0)
             form.addWidget(spin, row, 1)
             self.port_widgets += [box, spin]
@@ -567,10 +586,16 @@ class VpnWindow(QDialog):
         self.leak_btn = QPushButton("Проверить утечки DNS и IPv6")
         self.leak_btn.setToolTip(
             "Режим TUN, VPN подключён. DNS — через сервис bash.ws (ему уходят только случайные "
-            "имена для проверки), IPv6 — запросом к api6.ipify.org.")
+            "имена для проверки), если он недоступен — через whoami.akamai.net и ipwho.is; "
+            "IPv6 — запросом к api6.ipify.org.")
         self.leak_btn.clicked.connect(self._run_leaks)
+        self.netdiag_btn = QPushButton(NETDIAG_TITLE)
+        self.netdiag_btn.setToolTip("Проверить связь, kill switch, брандмауэр, системный прокси "
+                                    "и чужие VPN-клиенты с туннелем (ничего не меняет)")
+        self.netdiag_btn.clicked.connect(self._run_netdiag)
         row.addWidget(self.probe_btn)
         row.addWidget(self.leak_btn)
+        row.addWidget(self.netdiag_btn)
         row.addWidget(self.probe_host, 1)
         cl.addLayout(row)
         self.probe_table = QTableWidget(0, 5)
@@ -627,7 +652,9 @@ class VpnWindow(QDialog):
                             "напрямую и что блокируется (QUIC, UDP, российские сайты, реклама, "
                             "AdBlock, WARP, свои правила и файлы .dat). Действует во всех "
                             "режимах VLESS со следующего подключения.", "hint"))
-        self.routing_card = RoutingCard(self.bridge.log.emit, self._busy)
+        # маршрутизацию тоже можно менять во время подключения: со следующего подключения
+        self.routing_card = RoutingCard(self.bridge.log.emit, lambda: False)
+        self.routing_card.changed.connect(self._settings_changed)
         cl.addWidget(self.routing_card)
         row = QHBoxLayout()
         self.apps_btn = QPushButton()
@@ -648,6 +675,7 @@ class VpnWindow(QDialog):
             "— программы с прокси при обрыве просто теряют связь, мимо VPN они не уходят.")
         self.chk_kill.setChecked(cfg.get("vpn/killswitch"))
         self.chk_kill.toggled.connect(lambda on: cfg.set_("vpn/killswitch", on))
+        self.chk_kill.toggled.connect(lambda _on: self._settings_changed())
         cl.addWidget(self.chk_kill)
         f = QFormLayout()
         self.cmb_ip = QComboBox()
@@ -657,6 +685,7 @@ class VpnWindow(QDialog):
         self.cmb_ip.setCurrentIndex(self._ip_modes.index(mode) if mode in self._ip_modes else 0)
         self.cmb_ip.currentIndexChanged.connect(
             lambda i: cfg.set_("vpn/ip_mode", self._ip_modes[i]))
+        self.cmb_ip.currentIndexChanged.connect(lambda _i: self._settings_changed())
         self.cmb_ip.setToolTip(
             "Режим TUN. Только IPv4 — IPv6 перекрыт в туннеле, мимо VPN не идёт. Предпочтительно "
             "IPv6 — сайт с IPv6 открывается по IPv6, остальные по IPv4. IPv6 — так же, и "
@@ -688,6 +717,7 @@ class VpnWindow(QDialog):
             "виртуальные машины, локальные серверы или другие сетевые программы.")
         self.chk_strict.setChecked(cfg.get("vpn/strict_route") is not False)
         self.chk_strict.toggled.connect(lambda on: cfg.set_("vpn/strict_route", on))
+        self.chk_strict.toggled.connect(lambda _on: self._settings_changed())
         cl.addWidget(self.chk_strict)
         grid = QGridLayout()
         self.opt_boxes = {}
@@ -702,21 +732,21 @@ class VpnWindow(QDialog):
             box.setToolTip(tip)
             box.setChecked(cfg.get(f"vpn/{key}"))
             box.toggled.connect(lambda on, k=key: cfg.set_(f"vpn/{k}", on))
+            box.toggled.connect(lambda _on: self._settings_changed())
             grid.addWidget(box, 0, i)
             self.opt_boxes[key] = box
         cl.addLayout(grid)
         layout.addWidget(card)
         card, cl = _card()
-        cl.addWidget(_label("Запуск", "title"))
-        self.chk_autostart = QCheckBox("Подключать VPN при запуске программы (профиль, "
-                                       "отмеченный «подключать при запуске»)")
-        self.chk_autostart.setChecked(cfg.get("vpn/autostart"))
-        self.chk_autostart.toggled.connect(lambda on: cfg.set_("vpn/autostart", on))
-        cl.addWidget(self.chk_autostart)
+        cl.addWidget(_label("Ядра VPN", "title"))
+        cl.addWidget(_label("Подключение при запуске программы — галочка у профиля в разделе "
+                            "«Подключение».", "hint"))
         cl.addWidget(_label(self._cores_text(), "hint"))
         layout.addWidget(card)
-        layout.addWidget(_label("Настройки действуют со следующего подключения. Они относятся "
-                                "только к VPN и не меняют настройки антивируса.", "hint"))
+        layout.addWidget(_label("Настройки можно менять и во время подключения — действуют со "
+                                "следующего (сверху появится напоминание переподключиться). "
+                                "Они относятся только к VPN и не меняют настройки антивируса.",
+                                "hint"))
         layout.addStretch()
         self._show_builtin()
         return page
@@ -733,13 +763,13 @@ class VpnWindow(QDialog):
         self.dns_error.hide()
         cfg.set_("vpn/dns_server", text.strip())
         self._show_builtin()
+        self._settings_changed()
 
     def _show_builtin(self) -> None:
         """Что зависит от режима: программы мимо VPN — только TUN (это правило sing-box);
         DNS через VPN — неактивно, если DNS для нужных адресов задан в Windows 11."""
         tun = self._mode_from_boxes() == "tun"
-        busy = self._busy()
-        self.apps_btn.setEnabled(tun and not busy)
+        self.apps_btn.setEnabled(tun)
         self.apps_btn.setToolTip("" if tun else "Только в режиме TUN: в режиме прокси через VPN "
                                                 "идут лишь программы с прокси")
         from vpn import windns
@@ -748,8 +778,8 @@ class VpnWindow(QDialog):
             found = self._win_dns = windns.manual_dns()
         ipv4_only = str(cfg.get("vpn/ip_mode") or "ipv4") == "ipv4"
         covered = bool(found["v4"]) and (ipv4_only or bool(found["v6"]))
-        self.cmb_dns.setEnabled(tun and not busy and not covered)
-        self.chk_strict.setEnabled(tun and not busy)
+        self.cmb_dns.setEnabled(tun and not covered)
+        self.chk_strict.setEnabled(tun)
         text = windns.describe(found) if tun else "DNS через VPN и строгая маршрутизация — " \
                                                   "только в режиме TUN."
         if covered and tun:
@@ -798,16 +828,29 @@ class VpnWindow(QDialog):
                 select = self.profiles.index(self.active)
         self.cmb_profile.blockSignals(True)
         self.cmb_profile.clear()
+        self.profile_table.blockSignals(True)
+        self.profile_table.setRowCount(len(self.profiles))
         for i, p in enumerate(self.profiles):
             ms = self._pings.get(f"{p.name}|{p.server}", "")
-            suffix = "" if ms == "" else (" — нет ответа" if ms is None else f" — {ms:.0f} мс")
-            self.cmb_profile.addItem(p.title + suffix)
-            self.cmb_profile.setItemData(i, p.server, Qt.ItemDataRole.ToolTipRole)
+            ping = "" if ms == "" else ("нет ответа" if ms is None else f"{ms:.0f} мс")
+            self.cmb_profile.addItem(p.title)
+            for col, value in enumerate((p.server or "—", p.title, ping or "—")):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.profile_table.setItem(i, col, item)
         self.cmb_profile.blockSignals(False)
+        self.profile_table.blockSignals(False)
         if self.profiles:
             index = min(select, len(self.profiles) - 1)
             self.cmb_profile.setCurrentIndex(index)
             self._on_select(index)
+
+    def _on_table_select(self) -> None:
+        rows = {i.row() for i in self.profile_table.selectedIndexes()}
+        if len(rows) == 1:
+            row = rows.pop()
+            if row != self.cmb_profile.currentIndex():
+                self.cmb_profile.setCurrentIndex(row)  # → _on_select
 
     def _row(self) -> int:
         return self.cmb_profile.currentIndex()
@@ -818,9 +861,18 @@ class VpnWindow(QDialog):
 
     def _on_select(self, _row: int) -> None:
         p = self._current()
+        row = self._row()
+        if 0 <= row < self.profile_table.rowCount() and \
+                self.profile_table.currentRow() != row:
+            self.profile_table.blockSignals(True)
+            self.profile_table.selectRow(row)
+            self.profile_table.blockSignals(False)
         self.chk_auto.blockSignals(True)
-        self.chk_auto.setChecked(bool(p and p.auto_connect))
+        self.chk_auto.setChecked(bool(p and p.auto_connect and cfg.get("vpn/autostart")))
         self.chk_auto.blockSignals(False)
+        if self._busy() and p is not None and p is not self.active:
+            self._settings_changed("Выбран другой профиль — он подключится после "
+                                   "переподключения VPN.")
         mode = (p.mode or "tun") if p and p.kind == "vless" else ""
         for box, on in ((self.chk_tun, mode in ("tun", "tun-xray")),
                         (self.chk_proxy, mode == "proxy")):
@@ -847,6 +899,7 @@ class VpnWindow(QDialog):
             p.mode = self._mode_from_boxes()
             self._save()
         self._show_mode()
+        self._settings_changed()
         self._tick()
 
     def _show_mode(self) -> None:
@@ -925,6 +978,8 @@ class VpnWindow(QDialog):
         self._fill_profiles(0)
 
     def _on_auto(self, on: bool) -> None:
+        """Галочка у профиля сама включает подключение при запуске программы (vpn/autostart):
+        отдельной галочки в «Настройках клиента» больше нет."""
         p = self._current()
         if p is None:
             return
@@ -932,6 +987,15 @@ class VpnWindow(QDialog):
             other.auto_connect = False
         p.auto_connect = on
         self._save()
+        cfg.set_("vpn/autostart", on)
+
+    def _settings_changed(self, text: str = "") -> None:
+        """Настройку поменяли во время подключения: она подействует со следующего."""
+        if not self._busy():
+            return
+        self.restart_label.setText(text or "Настройки изменены — переподключите VPN, чтобы "
+                                           "они применились.")
+        self.restart_label.show()
 
     def autoconnect(self) -> bool:
         """VPN вместе с программой (vpn/autostart): профиль автоподключения или последний."""
@@ -983,6 +1047,7 @@ class VpnWindow(QDialog):
         if not self._foreign_tunnels_ok(p):
             return
         self.backend, self.active = backend, p
+        self.restart_label.hide()
         self._last = (0, 0, time.monotonic())
         self._ip_text = ""
         self._ip_backend = None
@@ -1005,6 +1070,8 @@ class VpnWindow(QDialog):
 
         from diag import features
         features.begin("vpn.connect").fact("kind", "переподключение")
+
+        self.restart_label.hide()
 
         def job():
             backend.disconnect()
@@ -1042,15 +1109,13 @@ class VpnWindow(QDialog):
         blocked = bool(backend and getattr(backend, "blocked", False))
         from vpn import killswitch
         self.unblock_btn.setVisible(not busy and (blocked or killswitch.active()))
-        for w in (self.chk_tun, self.chk_proxy, self.chk_kill, self.cmb_ip, self.cmb_dns,
-                  self.chk_strict, self.apps_btn, self.cmb_profile,
-                  *self.opt_boxes.values(), *self.port_widgets):
-            w.setEnabled(not busy and not stopping)  # действуют со следующего подключения
-        self.routing_card.set_busy(busy or stopping)
+        # настройки не блокируются во время подключения (комментарий 15.11.2026): изменённые
+        # действуют со следующего подключения — об этом напоминает restart_label
         if not busy and not stopping:
-            p = self._current()
-            for box in (self.chk_tun, self.chk_proxy):
-                box.setEnabled(bool(p and p.kind == "vless"))
+            self.restart_label.hide()
+        p = self._current()
+        for box in (self.chk_tun, self.chk_proxy):
+            box.setEnabled(bool(p and p.kind == "vless"))
         key = (self._mode_from_boxes(), self._busy())
         if key != getattr(self, "_builtin_key", None):  # раз в секунду читались настройки
             self._builtin_key = key
@@ -1063,27 +1128,19 @@ class VpnWindow(QDialog):
             "Клиент: " + ("—" if engine is None else getattr(engine, "exe", "") or (
                 "встроенная имитация" if p and p.kind == "demo"
                 else f"не найден: {engine.missing}")))
-        self.tiles["server"].setText(p.server if p else "—")
+        # внешний IP — только в журнале VPN (плитки «Сервер» и «Внешний IP» убраны)
         self._maybe_check_ip(backend if state == backends.CONNECTED else None)
-        self.tiles["ip"].setText(mask_ip(self._ip_text) if self._ip_text else
-                                 ("проверяю..." if self._ip_busy else "—"))
         self._maybe_update_routing()
         if state == backends.CONNECTED:
             seconds = int(time.time() - backend.since)
             self.tiles["time"].setText(f"{seconds // 3600:02d}:{seconds // 60 % 60:02d}:"
                                        f"{seconds % 60:02d}")
             rx, tx = self._counters(backend)
-            last_rx, last_tx, last_t = self._last
-            dt = max(0.5, time.monotonic() - last_t)
-            if last_rx or last_tx:
-                self.tiles["speed"].setText(f"↓ {human_size(int((rx - last_rx) / dt))}/с  "
-                                            f"↑ {human_size(int((tx - last_tx) / dt))}/с")
             self._last = (rx, tx, time.monotonic())
-            self.tiles["rx"].setText(human_size(rx))
-            self.tiles["tx"].setText(human_size(tx))
+            self.tiles["traffic"].setText(f"↓ {human_size(rx)}   ↑ {human_size(tx)}")
             self._maybe_check_certs()
         else:
-            for key in ("time", "speed", "rx", "tx"):
+            for key in ("time", "traffic"):
                 self.tiles[key].setText("—")
 
     def _counters(self, backend) -> tuple[int, int]:
@@ -1092,18 +1149,27 @@ class VpnWindow(QDialog):
         отстаёт на один такт — для плиток скорости это не заметно."""
         if getattr(self, "_counter_backend", None) is not backend:
             self._counter_backend, self._counter_value = backend, (0, 0)
-        if not getattr(self, "_counting", False):
-            self._counting = True
+        # один постоянный поток: запуск нового потока каждую секунду сам стоял до 0,5 с
+        # (Thread.start ждёт, пока поток запустится; Celeron, журнал 15.11.2026)
+        if getattr(self, "_counter_wake", None) is None:
+            self._counter_wake = threading.Event()
 
-            def job():
-                try:
-                    value = backend.counters()
-                    if self._counter_backend is backend:
+            def loop():
+                while True:
+                    self._counter_wake.wait()
+                    self._counter_wake.clear()
+                    target = self._counter_backend
+                    if target is None:
+                        continue
+                    try:
+                        value = target.counters()
+                    except Exception:  # noqa: BLE001 — счётчики не важнее окна
+                        continue
+                    if self._counter_backend is target:
                         self._counter_value = value
-                finally:
-                    self._counting = False
 
-            threading.Thread(target=job, daemon=True, name="vpn-counters").start()
+            threading.Thread(target=loop, daemon=True, name="vpn-counters").start()
+        self._counter_wake.set()
         return self._counter_value
 
     def _engine(self, p: profiles.Profile):
@@ -1489,6 +1555,7 @@ class VpnWindow(QDialog):
             cfg.set_("vpn/direct_apps", "\n".join(dialog.apps()))
             self._apps_text()
             self._show_builtin()
+            self._settings_changed()
 
     def _run_netdiag(self) -> None:
         """Проверка в фоне: соединения ждут до 3 с, список фильтров WFP — несколько секунд."""
@@ -1513,11 +1580,11 @@ class VpnWindow(QDialog):
         from toolbox.windows import info_dialog
         from vpn import netdiag
         self.netdiag_btn.setEnabled(True)
-        self.netdiag_btn.setText("Почему нет интернета?")
+        self.netdiag_btn.setText(NETDIAG_TITLE)
         bad = [f.title for f in found if f.level == netdiag.BAD]
         features.end_if_active("vpn.netdiag", True, problems=len(bad))
         self.bridge.log.emit("Проверка сети: " + ("; ".join(bad) if bad else "явных проблем нет"))
-        info_dialog(self, "Почему нет интернета?", netdiag.report(found), 720)
+        info_dialog(self, NETDIAG_TITLE, netdiag.report(found), 720)
 
     def _foreign_tunnels_ok(self, p) -> bool:
         """Перед подключением TUN: другой VPN-клиент со своим туннелем мешает нашему (два

@@ -67,3 +67,50 @@ def in_program_dir(exe: str) -> bool:
         except Exception:  # noqa: BLE001 — права не узнать: папку закрытой не считаем
             _dir_safe = False
     return _dir_safe
+
+
+# ---------- обе версии программы (релизная и тестовая) ----------
+EDITION_DIRS = ("StretchBIT", "StretchBIT-test")   # папки установки в Program Files
+_safe_dirs: dict[str, bool] = {}
+
+
+def install_dirs() -> list[str]:
+    """Папки установки программы (обеих версий) с разделителем на конце, os.path.normcase.
+    Из исходников тоже: служба установленной версии — своя (15.11.2026 полная проверка из
+    исходников нашла «вирусы» в памяти службы — там загружены правила YARA)."""
+    roots = {os.environ.get("ProgramW6432", ""), os.environ.get("ProgramFiles", "")}
+    found = [os.path.normcase(os.path.join(r, name)) + os.sep
+             for r in roots if r for name in EDITION_DIRS]
+    own = program_exe()
+    if own:
+        found.append(os.path.dirname(own) + os.sep)
+    return sorted(set(found))
+
+
+def _dir_closed(folder: str) -> bool:
+    if folder not in _safe_dirs:
+        try:
+            import winacl
+            _safe_dirs[folder] = os.path.isdir(folder) and \
+                winacl.admin_only(os.path.join(folder, "StretchBIT.exe"))[0]
+        except Exception:  # noqa: BLE001 — права не узнать: папку закрытой не считаем
+            _safe_dirs[folder] = False
+    return _safe_dirs[folder]
+
+
+def is_own_file(exe: str) -> bool:
+    """Файл из папки установки StretchBIT (любой версии), закрытой от записи: сама программа,
+    её служба, ядра VPN, rizin. Открытая папка не считается: свой файл туда подложит любой."""
+    if not exe:
+        return False
+    path = os.path.normcase(os.path.normpath(exe))
+    return any(path.startswith(folder) and _dir_closed(folder) for folder in install_dirs())
+
+
+def is_own_process(pid: int, exe: str | None = None) -> bool:
+    """Процесс программы (любой версии) или её файла из закрытой папки установки."""
+    if is_program(pid, exe):
+        return True
+    if exe is None:
+        exe = image(pid)
+    return is_own_file(exe)

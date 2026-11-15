@@ -226,17 +226,13 @@ def _install_title_bar_filter(app) -> None:
     global _filter
     if _filter is not None:
         return
-    from PySide6.QtCore import QEvent, QObject
+    from ui import apphooks  # общий фильтр приложения: тип события — один раз на событие
 
-    class TitleBarFilter(QObject):
-        def eventFilter(self, watched, event):
-            if event.type() == QEvent.Type.Show and getattr(watched, "isWindow", None) \
-                    and watched.isWindow():
-                set_title_bar(watched, _dark)
-            return False
+    def on_show(widget):
+        set_title_bar(widget, _dark)
 
-    _filter = TitleBarFilter(app)
-    app.installEventFilter(_filter)
+    _filter = on_show
+    apphooks.on_show(on_show)
 
 
 def apply_theme(app, theme: str) -> None:

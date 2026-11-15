@@ -13,7 +13,7 @@ from scanner.heuristics import API_GROUPS, PEReport, analyze_pe, get_threshold
 from scanner.signature import SignatureInfo, check_revocation, inspect_signature
 from scanner import overrides
 from scanner.engine import revocation_enabled
-from scanner.relations import signed_partner, weak_match
+from scanner.relations import CONFIRM, STRONG, WEAK, rule_tier, signed_partner, weak_match
 from scanner.yara_engine import MAX_FILE_SIZE, match_details
 
 from analyzer.code import CodeView, build_code_view
@@ -328,13 +328,17 @@ def build_report(path: Path, signatures: set[str], rules, whitelist: set[str],
     yara_skipped = stat.st_size > MAX_FILE_SIZE
     stage("yara")
     matches = [] if (rules is None or yara_skipped) else match_details(rules, path)
-    yara_names = [m.rule for m in matches]
+    tiers = {m.rule: rule_tier(m) for m in matches}
+    confirm = [m.rule for m in matches if tiers[m.rule] == CONFIRM]
+    yara_names = [m.rule for m in matches if tiers[m.rule] != CONFIRM]  # первая очередь
     stage("heuristics")
     heuristics = analyze_pe(path)
     threshold = get_threshold()
     partner = None  # подписанный файл из той же папки, частью которого выглядит этот
-    if signature.status != "valid" and ((matches and all(weak_match(m) for m in matches))
-                                        or (not matches and heuristics.score >= threshold)):
+    first = [m for m in matches if tiers[m.rule] != CONFIRM]
+    if signature.status != "valid" and (
+            (first and all(weak_match(m) or tiers[m.rule] == WEAK for m in first))
+            or (not first and (heuristics.score >= threshold or confirm))):
         partner = signed_partner(path)
     stage("structure")
     pe = read_pe(path, stat.st_size) if key == "pe" else None
@@ -352,8 +356,31 @@ def build_report(path: Path, signatures: set[str], rules, whitelist: set[str],
                    f"нежелательное», но файл — часть подписанной программы ({partner[1]}): "
                    "угрозой не считается")
         level = "info"
-    elif yara_names:
-        verdict, level = "Угроза: сработали правила YARA: " + ", ".join(yara_names), "threat"
+    elif yara_names and (confirm or any(tiers[n] == STRONG for n in yara_names)):
+        also = f" (подтверждают: {', '.join(confirm)})" if confirm else ""
+        verdict, level = "Угроза: сработали правила YARA: " + ", ".join(yara_names) + also, \
+            "threat"
+    elif yara_names:  # только слабые: инструменты, нежелательные программы
+        verdict = ("Подозрительно: правила YARA класса «инструмент или нежелательная "
+                   "программа»: " + ", ".join(yara_names))
+        level = "suspicious"
+    elif confirm and heuristics.score >= threshold and signature.status != "valid" \
+            and not partner:
+        verdict = (f"Угроза: эвристика PE ({heuristics.score} баллов) подтверждена правилами "
+                   "YARA второй очереди: " + ", ".join(confirm))
+        level = "threat"
+    elif confirm and heuristics.score < threshold and signature.status != "valid" \
+            and not partner:
+        verdict = ("Проверить: совпали только правила YARA второй очереди (" + ", ".join(confirm)
+                   + "), а подписи нет или она недействительна. Это не угроза: такие правила "
+                   "дают ложные срабатывания и сами по себе находку не делают")
+        level = "suspicious"
+    elif confirm and heuristics.score < threshold:
+        verdict = ("Угроз не найдено. Правила YARA второй очереди (" + ", ".join(confirm)
+                   + ") не учитываются: " + ("подпись действительна" if
+                                             signature.status == "valid" else
+                                             f"файл — часть подписанной программы ({partner[1]})"))
+        level = "clean"
     elif heuristics.score >= threshold:
         if signature.status == "valid":
             verdict = (f"Эвристика сработала ({heuristics.score} баллов), но подпись действительна: "

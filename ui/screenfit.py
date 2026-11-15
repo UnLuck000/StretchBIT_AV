@@ -15,7 +15,6 @@
 import os
 import sys
 
-from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QWidget
 
@@ -102,25 +101,14 @@ def fit_window(widget: QWidget) -> bool:
     return changed
 
 
-class _FitFilter(QObject):
+def _on_show(widget) -> None:
     """Каждое окно (не меню и не подсказка) при показе подгоняется под экран."""
-
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.Show and isinstance(watched, QWidget) \
-                and watched.isWindow() \
-                and watched.windowType() in (Qt.WindowType.Window, Qt.WindowType.Dialog):
-            try:
-                fit_window(watched)
-            except RuntimeError:  # окно удаляется
-                pass
-        return False
-
-
-_filter: _FitFilter | None = None
+    try:
+        fit_window(widget)
+    except RuntimeError:  # окно удаляется
+        pass
 
 
 def install(app) -> None:
-    global _filter
-    if _filter is None:
-        _filter = _FitFilter(app)
-        app.installEventFilter(_filter)
+    from ui import apphooks  # общий фильтр приложения (ui/apphooks.py)
+    apphooks.on_show(_on_show)

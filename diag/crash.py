@@ -182,6 +182,49 @@ class FreezeWatch:
                 reported = 0.0
 
 
+class MainThreadGC:
+    """Сборщик мусора Python — только в главном потоке, по таймеру Qt (как в calibre).
+
+    Обычно циклический сборщик запускается при выделении памяти в любом потоке и в любой
+    момент: посреди перерисовки или вызова метода Qt (стиль, фильтр событий) он удалял
+    объекты Qt, собранные в циклы (окна и виджеты с лямбдами на self), — из чужого потока или
+    пока Qt ещё работал с ними. Три вылета 15.11.2026 «Fatal Python error: Aborted» —
+    главный поток внутри enum.__call__ (Qt вызывал метод Python), перед этим Qt писал
+    «QWaitCondition: Destroyed while threads are still waiting». Здесь сборщик выключен и
+    запускается раз в INTERVAL мс в главном потоке, когда цикл событий свободен."""
+    INTERVAL = 1000
+    FULL_EVERY = 60.0   # с
+
+    def __init__(self):
+        import gc
+        from PySide6.QtCore import QTimer
+        self._gc = gc
+        self._full = time.monotonic()
+        self.threshold = gc.get_threshold()
+        gc.disable()
+        self._timer = QTimer()
+        self._timer.timeout.connect(self.check)
+        self._timer.start(self.INTERVAL)
+
+    def check(self) -> None:
+        gc = self._gc
+        l0, l1, l2 = gc.get_count()
+        if l0 > self.threshold[0]:
+            generation = 0
+            if l1 > self.threshold[1]:
+                generation = 1
+                # полная сборка (все объекты программы) — не чаще FULL_EVERY: на слабом ПК
+                # это десятки миллисекунд в главном потоке
+                now = time.monotonic()
+                if l2 > self.threshold[2] and now - self._full >= self.FULL_EVERY:
+                    generation, self._full = 2, now
+            gc.collect(generation)
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._gc.enable()
+
+
 def install_qt_messages() -> None:
     from PySide6.QtCore import QtMsgType, qInstallMessageHandler
     qt_log = get("qt")
@@ -190,6 +233,18 @@ def install_qt_messages() -> None:
               QtMsgType.QtFatalMsg: qt_log.critical}
 
     def handler(kind, context, message):
+        # после qFatal Qt сразу останавливает программу: текст — в crash.log первым делом
+        # (15.11.2026 три вылета прошли без него — видно было только «Aborted»); туда же —
+        # предупреждения Qt из фоновых потоков: так видно Qt-объекты не в своём потоке
+        background = threading.current_thread() is not threading.main_thread()
+        if _crash_file is not None and (kind == QtMsgType.QtFatalMsg or background):
+            try:
+                where = f" ({threading.current_thread().name})" if background else ""
+                _crash_file.write(f"Qt {'fatal' if kind == QtMsgType.QtFatalMsg else 'warning'}"
+                                  f"{where}: {message}\n")
+                _crash_file.flush()
+            except (OSError, ValueError):
+                pass
         levels.get(kind, qt_log.warning)("%s", message)
 
     qInstallMessageHandler(handler)

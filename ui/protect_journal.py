@@ -22,6 +22,10 @@ ID_ROLE = Qt.ItemDataRole.UserRole + 1
 COLORS = {"threat": "#d9534f", "suspicious": "#d68910"}
 
 
+SHOWN_TEXT = 300   # символов «Что найдено» в строке таблицы
+TIP_TEXT = 1500    # в подсказке
+
+
 class ProtectJournalPage(QWidget):
     changed = Signal()            # карантин, белый список или журнал действий изменились
     analyze = Signal(str)         # открыть файл в сканере
@@ -70,12 +74,17 @@ class ProtectJournalPage(QWidget):
             path = r.get("path") or ""
             name = os.path.basename(path) if path else "—"
             count = f" (×{r['count']})" if r.get("count", 1) > 1 else ""
-            item = QTreeWidgetItem([r["time"].replace("T", " "), name, r["text"] + count,
+            # в таблице — начало текста: у кэша правил YARA в нём были сотни имён правил
+            # (десятки тысяч символов), и прокрутка журнала дёргалась — Qt заново мерил и
+            # обрезал такую строку при каждой перерисовке. Полный текст — в «Описании»
+            text = r["text"] if len(r["text"]) <= SHOWN_TEXT else (
+                r["text"][:SHOWN_TEXT].rstrip(", ") + "…")
+            item = QTreeWidgetItem([r["time"].replace("T", " "), name, text + count,
                                     r.get("source", ""),
                                     threatlog.STATUS_TEXT.get(r["status"], r["status"])])
             item.setData(0, ID_ROLE, r["id"])
             item.setToolTip(1, path)
-            item.setToolTip(2, r["text"])
+            item.setToolTip(2, r["text"][:TIP_TEXT])
             if r["status"] in threatlog.OPEN:
                 item.setForeground(2, QBrush(QColor(COLORS.get(r["level"], "#d68910"))))
             else:

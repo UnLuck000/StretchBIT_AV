@@ -73,7 +73,7 @@ FEATURES: dict[str, Feature] = {f.id: f for f in [
     _F("win.vpn", "Окно VPN", "VpnWindow", "session"),
     _F("vpn.connect", "VPN: подключение", "VpnWindow"),
     _F("vpn.checks", "VPN: проверка сайтов и сертификатов", "VpnWindow"),
-    _F("vpn.netdiag", "VPN: «Почему нет интернета?»", "VpnWindow"),
+    _F("vpn.netdiag", "VPN: «Проверить исправность интернета»", "VpnWindow"),
     _F("vpn.routing", "VPN: импорт профилей маршрутизации (файлы, ссылка)", "VpnWindow",
        timed=False),
     _F("vpn.warp", "VPN: получение ключа WARP", "VpnWindow", timed=False),

@@ -358,7 +358,7 @@ class LaunchGuard:
         if not exe:
             return  # процесс уже завершился или защищён
         import ownproc
-        if ownproc.is_program(pid, exe) or ownproc.in_program_dir(exe):
+        if ownproc.is_own_process(pid, exe):  # любая версия программы и её файлы
             return  # окно программы, её рабочие процессы и ядра из папки установки
         name = os.path.basename(exe)
         self._names[pid] = name

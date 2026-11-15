@@ -33,6 +33,29 @@ _lock = threading.Lock()
 _signed: dict[tuple[str, int, int], bool] = {}  # (путь, размер, mtime) -> подпись действительна
 
 
+STRONG, WEAK, CONFIRM = "strong", "weak", "confirm"
+HUNTING_RE = re.compile(r"hunting|(^|_)hunt(_|$)", re.IGNORECASE)
+
+
+def rule_tier(match) -> str:
+    """Очередь правила YARA (15.11.2026):
+    • confirm — вторая очередь: список «confirm» в overrides (правила с ложными
+      срабатываниями) и поисковые (category hunting). В одиночку находку не делают;
+    • weak — инструменты и нежелательное (PUA, HackTool, category TOOL, score < 70): в
+      одиночку — «подозрительно», не угроза (настоящий LaZagne так не пропадёт);
+    • strong — правила на вредоносы: угроза."""
+    from scanner import overrides
+    if overrides.rule_confirm(match.rule):
+        return CONFIRM
+    meta = getattr(match, "meta", None) or {}
+    category = str(meta.get("category", ""))
+    if HUNTING_RE.search(f"{match.rule} {category}"):
+        return CONFIRM
+    if weak_match(match) or category.upper() == "TOOL":
+        return WEAK
+    return STRONG
+
+
 def weak_match(match) -> bool:
     """Слабое ли срабатывание правила YARA: класс «потенциально нежелательное» или
     низкая оценка в метаданных. Такое снимается связью с подписанной программой."""

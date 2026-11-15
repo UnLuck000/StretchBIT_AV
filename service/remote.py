@@ -269,6 +269,14 @@ class RemoteBackend:
         self.error = ""
         self._listening = False
 
+    @property
+    def exe(self) -> str:
+        """Подпись «Клиент:» в окне VPN. Ядра запускает служба, путей окно не знает — без
+        этого окно писало «Клиент: не найден:» при работающем TUN (Windows 10, 15.11.2026)."""
+        cores = {"vless": "sing-box + Xray", "wireguard": "WireGuard",
+                 "openvpn": "OpenVPN"}.get(self.kind, self.kind)
+        return f"{cores} в службе защиты"
+
     def _listen(self) -> None:
         # слушает только подключение, которое ведёт (окно создаёт и пробные объекты). Слушатель
         # один: окно создаёт новый объект на каждое подключение, и прежние слушатели

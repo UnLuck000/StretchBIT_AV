@@ -12,6 +12,9 @@ leak_test (режим TUN, VPN подключён):
     в его зоне, а он сообщает, какие DNS-серверы эти запросы ему передали и из какой они
     страны. DNS-сервер не в той стране, что внешний адрес VPN, — вероятная утечка (запросы
     уходят провайдеру). Сервису уходят только эти случайные имена.
+    bash.ws недоступен (из России — часто, комментарий 15.11.2026) — запасной способ
+    dns_check_akamai: имя whoami.akamai.net отвечает адресом DNS-сервера, который его
+    спросил; страну и сеть этого адреса и внешнего адреса даёт ipwho.is.
 Без прокси из переменных окружения: запрос должен идти тем же путём, что у обычных программ.
 """
 import json
@@ -128,11 +131,46 @@ def dns_check(get=_get, resolve=socket.getaddrinfo) -> Finding:
                    f"что и внешний адрес VPN ({country or 'не определена'}).", table)
 
 
+def _geo(get, ip: str = "") -> dict:
+    """Страна и сеть адреса (ipwho.is; пустой ip — свой внешний адрес)."""
+    data = json.loads(get(f"https://ipwho.is/{ip}", 10).decode("utf-8"))
+    if not data.get("success", False):
+        raise ValueError(data.get("message") or "ipwho.is не ответил")
+    return {"ip": data.get("ip", ip), "country": data.get("country", ""),
+            "isp": (data.get("connection") or {}).get("isp", "")}
+
+
+def dns_check_akamai(get=_get, resolve=socket.gethostbyname) -> Finding:
+    """Запасная проверка DNS: whoami.akamai.net отвечает адресом спросившего DNS-сервера."""
+    try:
+        resolver = resolve("whoami.akamai.net")
+    except OSError as e:
+        return Finding(WARN, "DNS: проверка не удалась", f"Имя whoami.akamai.net не "
+                       f"разрешилось: {e}")
+    try:
+        exit_ip, dns = _geo(get), _geo(get, resolver)
+    except (OSError, ValueError) as e:
+        return Finding(WARN, "DNS: проверка не удалась", f"Сервис ipwho.is недоступен: {e}")
+    table = [(exit_ip["ip"], exit_ip["country"], exit_ip["isp"], "ip"),
+             (dns["ip"], dns["country"], dns["isp"], "dns")]
+    if exit_ip["country"] and dns["country"] and exit_ip["country"] != dns["country"]:
+        return Finding(BAD, "Вероятная утечка DNS", f"Внешний адрес VPN — {exit_ip['country']}, "
+                       f"а запрос передал DNS-сервер из другой страны: {dns['isp'] or dns['ip']} "
+                       f"({dns['country']}). Так провайдер видит, какие сайты вы открываете.",
+                       table)
+    return Finding(OK, "DNS через VPN", f"DNS-сервер ({dns['isp'] or 'сеть не определена'}) в "
+                   f"той же стране, что и внешний адрес VPN ({exit_ip['country'] or '?'}).",
+                   table)
+
+
 def leak_test(ip_mode: str) -> list[Finding]:
     with ThreadPoolExecutor(2) as pool:
         ipv6 = pool.submit(ipv6_check, ip_mode)
         dns = pool.submit(dns_check)
-        return [dns.result(), ipv6.result()]
+        result = dns.result()
+        if result.level == WARN and "bash.ws" in result.detail:
+            result = dns_check_akamai()  # bash.ws недоступен — запасной способ
+        return [result, ipv6.result()]
 
 
 def report(findings: list[Finding]) -> str:

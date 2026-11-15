@@ -43,21 +43,24 @@ class UsbMixin:
     def _poll_usb(self):
         """Опрос дисков — в фоне: GetVolumeInformation у засыпающей флешки или картридера
         отвечает секундами (зависание интерфейса 10,7 с в журнале 10.11.2026)."""
-        if getattr(self, "_usb_polling", False):
-            return
-        self._usb_polling = True
+        # один постоянный поток: новый поток раз в 2 с сам стоял до 0,5 с на старте
+        # (Thread.start ждёт запуска; Celeron, журнал 15.11.2026)
+        if getattr(self, "_usb_wake", None) is None:
+            self._usb_wake = threading.Event()
 
-        def job():
-            from usbguard.scan import removable_drives
-            try:
-                drives = removable_drives()
-            except Exception:  # noqa: BLE001 — следующий опрос через 2 с
-                drives = None
-            self._usb_polling = False
-            if drives is not None:
-                self.usb_drives.emit(drives)
+            def loop():
+                from usbguard.scan import removable_drives
+                while True:
+                    self._usb_wake.wait()
+                    self._usb_wake.clear()
+                    try:
+                        drives = removable_drives()
+                    except Exception:  # noqa: BLE001 — следующий опрос через 2 с
+                        continue
+                    self.usb_drives.emit(drives)
 
-        threading.Thread(target=job, daemon=True, name="usb-poll").start()
+            threading.Thread(target=loop, daemon=True, name="usb-poll").start()
+        self._usb_wake.set()
 
     def _on_usb_drives(self, found):
         drives = dict(found)

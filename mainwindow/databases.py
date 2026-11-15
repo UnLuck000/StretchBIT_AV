@@ -11,7 +11,7 @@ from diag import features
 from networkmonitor.ioc import load_ip_blocklist
 from recovery import activity
 from scanner import pool as scan_pool
-from scanner.hashing import load_all_signatures
+from scanner.hashing import count_hashes
 from scanner.yara_engine import count_rules
 from ui import settings as cfg
 import appinfo
@@ -37,11 +37,11 @@ class DatabasesMixin:
 
             def job():
                 try:
-                    db = load_all_signatures(SIGNATURES.parent)
+                    hashes = count_hashes(SIGNATURES.parent)
                     rule_files, rules = count_rules(RULES_DIR)
                     md5 = sum(p.stat().st_size // 16
                               for p in (SIGNATURES.parent / "feeds").glob("*.md5.bin"))
-                    stats = {"hashes": len(db), "md5": md5, "rules": rules,
+                    stats = {"hashes": hashes + md5, "md5": md5, "rules": rules,
                              "rule_files": rule_files,
                              "c2": len(load_ip_blocklist(NETFEEDS_DIR))}
                 except Exception as e:  # noqa: BLE001

@@ -469,6 +469,9 @@ class ProtectionMixin:
         (смотрят новые события). Если пользователь листает выше, проверенные файлы его не
         двигают; удаление старых строк сверху (больше 500) не сдвигает видимую часть."""
         _dlog.log(30 if threat else 10, "Журнал защиты: %s", item.text())
+        if len(item.text()) > 400:  # сотни имён правил в строке: прокрутка списка дёргалась
+            item.setToolTip(item.text()[:1500])
+            item.setText(item.text()[:400].rstrip(", ") + "…")
         log = self.protect_log
         bar = log.verticalScrollBar()
         at_bottom = bar.value() >= bar.maximum() - 1
@@ -609,7 +612,8 @@ class ProtectionMixin:
         self.watch_list.addItem(item)
 
     def add_watch_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Папка для наблюдения")
+        from analyzer.scanpage import documents_dir
+        folder = QFileDialog.getExistingDirectory(self, "Папка для наблюдения", documents_dir())
         if folder and not self.watch_list.findItems(folder, Qt.MatchFlag.MatchExactly):
             self._add_watch_item(folder)
             self._save_watch_folders()
@@ -688,6 +692,7 @@ class ProtectionMixin:
         from service.client import EventPump, ServiceClient
         self.service = client
         self.service_event.connect(self._on_service_event)
+        self.service_status_ready.connect(self._on_service_status_ready)
         from service import remote
 
         def on_event(ev):
@@ -725,11 +730,48 @@ class ProtectionMixin:
 
     def _sync_service_state(self, adopt_folders: bool = False) -> bool | None:
         """Состояние защиты окна — по службе (её могли включить при загрузке Windows или
-        выключить из другого сеанса). True/False — работает ли; None — нет связи."""
-        from service.client import RemoteMonitor
+        выключить из другого сеанса). True/False — работает ли; None — нет связи.
+        Ждёт ответа в главном потоке — только при запуске; по событиям службы —
+        _sync_service_state_async."""
         status = self._service_status()
         if status is None:
             return None
+        return self._apply_service_status(status, adopt_folders)
+
+    def _sync_service_state_async(self) -> None:
+        """То же по событию службы, но запрос — в фоновом потоке и своим подключением:
+        15.11.2026 служба на Celeron 17,5 с не отвечала на status, и всё это время окно
+        стояло (ожидание шло в главном потоке)."""
+        if getattr(self, "_status_busy", False):
+            self._status_again = True
+            return
+        self._status_busy, self._status_again = True, False
+        service = self.service
+
+        def job():
+            from service.client import ServiceClient, ServiceError
+            client = ServiceClient(service.name, service.verify_server)
+            try:
+                result = client.call("status", timeout=20.0)
+            except ServiceError as e:
+                result = str(e)
+            finally:
+                client.close()
+            self.service_status_ready.emit(result)
+        threading.Thread(target=job, daemon=True, name="svc-status").start()
+
+    def _on_service_status_ready(self, status) -> None:
+        self._status_busy = False
+        if isinstance(status, dict):
+            self._apply_service_status(status)
+        else:
+            self._protect_line(f"[Служба] нет связи со службой защиты: {status}", "",
+                               "darkorange")
+        if getattr(self, "_status_again", False):
+            self._sync_service_state_async()
+
+    def _apply_service_status(self, status: dict, adopt_folders: bool = False) -> bool:
+        from service.client import RemoteMonitor
         if adopt_folders and status["folders"]:
             self.watch_list.clear()
             for folder in status["folders"]:
@@ -761,6 +803,8 @@ class ProtectionMixin:
         from processmanager.memscan import reset_cache
         from scanner import pool as scan_pool
         self._service_db_last_update = time.time()
+        self._db_stats = None  # счётчики на главной — заново (раньше оставались нулевыми после
+        # первой закачки баз службой: окно считало их при запуске, когда баз ещё не было)
         reset_cache()
         reset_bases()
         scan_pool.reset()
@@ -778,7 +822,7 @@ class ProtectionMixin:
                     self._service_db_progress = None
                     self.refresh_dashboard()
             else:
-                self._sync_service_state()
+                self._sync_service_state_async()
             return
         if ev.get("replay"):  # прежние строки — только в журнал на странице
             if kind in ("scanned", "threat", "error"):
@@ -789,7 +833,7 @@ class ProtectionMixin:
                 self.add_protect_item(item)
             return
         if kind == "state":
-            self._sync_service_state()
+            self._sync_service_state_async()
             return
         if kind == "db":
             if text == "start":

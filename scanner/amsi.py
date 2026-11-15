@@ -104,7 +104,7 @@ def scan_content(data: bytes, name: str = "", signatures=None, rules=None) -> Ve
         return Verdict("threat", f"попытка отключить AMSI («{bypass.group(0)[:60]}»)")
     if rules is None:
         return Verdict("clean")
-    from scanner.relations import weak_match
+    from scanner.relations import CONFIRM, STRONG, rule_tier
     from scanner.yara_engine import match_details
     path = Path(name or "script.ps1")
     matches = match_details(rules, path, timeout=YARA_TIMEOUT, data=data)
@@ -113,11 +113,16 @@ def scan_content(data: bytes, name: str = "", signatures=None, rules=None) -> Ve
         names = {m.rule for m in matches}
         matches += [m for m in match_details(rules, path, timeout=YARA_TIMEOUT, data=utf8)
                     if m.rule not in names]
-    strong = [m.rule for m in matches if not weak_match(m)]
+    tiers = {m.rule: rule_tier(m) for m in matches}
+    strong = [m.rule for m in matches if tiers[m.rule] == STRONG]
     if strong:
         return Verdict("threat", "правила YARA: " + ", ".join(strong[:5]))
-    if matches:
-        return Verdict("suspicious", "правила YARA (слабые): " + ", ".join(m.rule for m in matches[:5]))
+    weak = [m.rule for m in matches if tiers[m.rule] != CONFIRM]
+    if weak:
+        return Verdict("suspicious", "правила YARA (слабые): " + ", ".join(weak[:5]))
+    if matches:  # только вторая очередь: у скрипта подписи нет — «проверить», не блокировать
+        return Verdict("suspicious", "правила YARA (проверить): "
+                       + ", ".join(m.rule for m in matches[:5]))
     return Verdict("clean")
 
 

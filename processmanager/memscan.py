@@ -102,7 +102,7 @@ def kernel_process(pid: int, ppid: int, exe: str) -> bool:
 
 @dataclass
 class MemResult:
-    status: str  # clean | match | signed | denied | timeout | error | kernel
+    status: str  # clean | match | signed | denied | timeout | error | kernel | own
     # signed: совпадение в процессе с действительной подписью — скорее ложное
     matches: list[str] = field(default_factory=list)
     message: str = ""
@@ -123,6 +123,8 @@ class MemResult:
             return "Таймаут" + (": " + ", ".join(self.matches) if self.matches else "")
         if self.status == "denied":
             return "Нет доступа"
+        if self.status == "own":
+            return "Не проверяется: StretchBIT (в памяти — правила YARA)"
         if self.status == "kernel":
             return "Не проверяется: процесс ядра без файла"
         return "Ошибка"

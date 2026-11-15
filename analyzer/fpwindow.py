@@ -154,12 +154,14 @@ class FalsePositiveWindow(QMainWindow):
 
     # ---------- выбор и запуск ----------
     def _pick_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Файл")
+        from analyzer.scanpage import documents_dir
+        path, _ = QFileDialog.getOpenFileName(self, "Файл", documents_dir())
         if path:
             self.path_edit.setText(os.path.normpath(path))
 
     def _pick_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Папка")
+        from analyzer.scanpage import documents_dir
+        path = QFileDialog.getExistingDirectory(self, "Папка", documents_dir())
         if path:
             self.path_edit.setText(os.path.normpath(path))
 

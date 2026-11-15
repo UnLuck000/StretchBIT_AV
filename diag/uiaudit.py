@@ -26,9 +26,9 @@ def _button_text(b: QAbstractButton) -> str:
 
 
 class UiAudit(QObject):
-    def eventFilter(self, watched, event):
+    def handle(self, watched, event, kind) -> None:
+        """Из общего фильтра приложения (ui/apphooks.py): тип события уже определён."""
         try:
-            kind = event.type()
             if kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
                 self._click(watched, event)
             elif kind == QEvent.Type.KeyPress and event.key() in (Qt.Key.Key_Return,
@@ -46,7 +46,6 @@ class UiAudit(QObject):
                 features.window_closed(type(watched).__name__)
         except Exception:  # noqa: S110 — учёт действий не должен мешать событиям интерфейса
             pass
-        return False
 
     def _click(self, obj, event):
         if isinstance(obj, QMenu):
@@ -73,8 +72,9 @@ _audit: UiAudit | None = None
 
 def install(app: QApplication) -> None:
     global _audit
+    from ui import apphooks
     _audit = UiAudit(app)
-    app.installEventFilter(_audit)
+    apphooks.on_event(_audit.handle)
 
 
 def watch_combo(combo: QComboBox, name: str) -> None:

@@ -166,21 +166,72 @@ def _write_secure(data: dict) -> None:
     trustseal.saved(path)
 
 
-_stores = threading.local()
+class _SharedSettings:
+    """Один QSettings на всю программу, обращения из любых потоков — под блокировкой.
+
+    Раньше (до 15.11.2026) был свой QSettings на каждый поток (threading.local). QSettings —
+    это QObject: созданный в потоке Python, он привязан к нему, и Qt заводит для такого потока
+    служебный объект (QAdoptedThread). Поток заканчивался, его QSettings удалялся позже — и
+    вместе с ним Qt удалял служебный объект умершего потока: «QWaitCondition: Destroyed while
+    threads are still waiting», «QThreadStorage: entry 1 destroyed before end of thread», затем
+    qFatal и аварийная остановка программы (три вылета 15.11.2026, Windows 10 и 11). Теперь
+    объект один, создаётся и живёт в главном потоке (созданный в другом потоке — сразу
+    переносится в главный), и никогда не удаляется до выхода."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self._lock = threading.RLock()
+        self._qs = QSettings(path, QSettings.Format.IniFormat)
+        if threading.current_thread() is not threading.main_thread():
+            from PySide6.QtCore import QCoreApplication
+            app = QCoreApplication.instance()
+            if app is not None:  # переносить можно только из своего потока — он и есть
+                self._qs.moveToThread(app.thread())
+
+    def value(self, key: str, default=None, type=None):  # noqa: A002 — как у QSettings
+        with self._lock:
+            if type is None:
+                return self._qs.value(key, default)
+            return self._qs.value(key, default, type=type)
+
+    def setValue(self, key: str, value) -> None:  # noqa: N802 — как у QSettings
+        with self._lock:
+            self._qs.setValue(key, value)
+
+    def remove(self, key: str) -> None:
+        with self._lock:
+            self._qs.remove(key)
+
+    def contains(self, key: str) -> bool:
+        with self._lock:
+            return self._qs.contains(key)
+
+    def allKeys(self) -> list[str]:  # noqa: N802 — как у QSettings
+        with self._lock:
+            return self._qs.allKeys()
+
+    def sync(self) -> None:
+        with self._lock:
+            self._qs.sync()
+
+    def fileName(self) -> str:  # noqa: N802 — как у QSettings
+        return self._qs.fileName()
 
 
-def store() -> QSettings:
+_shared: _SharedSettings | None = None
+_shared_lock = threading.Lock()
+
+
+def store() -> _SharedSettings:
     """settings.ini в папке конфигурации (userdata.py). ORG/APP — прежнее место в реестре:
-    его переносит userdata.migrate и чистит удаление.
-    Объект — один на поток и файл: создание QSettings на каждый cfg.get (таймеры раз в
-    секунду) каждый раз сверяло файл с диском. Сам файл Qt делит между объектами процесса,
-    так что запись из одного потока сразу видна остальным."""
+    его переносит userdata.migrate и чистит удаление. Объект один на программу (см.
+    _SharedSettings); новый — только если сменилась папка конфигурации (тесты)."""
+    global _shared
     path = str(userdata.SETTINGS_FILE)
-    cached = getattr(_stores, "item", None)
-    if cached is None or cached[0] != path:
-        cached = (path, QSettings(path, QSettings.Format.IniFormat))
-        _stores.item = cached
-    return cached[1]
+    with _shared_lock:
+        if _shared is None or _shared.path != path:
+            _shared = _SharedSettings(path)
+        return _shared
 
 
 def get(key: str):

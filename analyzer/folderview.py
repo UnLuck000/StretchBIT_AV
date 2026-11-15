@@ -82,6 +82,11 @@ def classify(reason: str | None) -> tuple[str, str]:
         return "clean", "Чисто"
     if reason.startswith("Heuristic"):
         return "suspicious", "Подозрительно: " + reason.removeprefix("Heuristic: ")
+    if reason.startswith("YARA (слабое): "):  # engine.WEAK_PREFIX: инструмент, нежелательное
+        return "suspicious", "Подозрительно: YARA: " + reason.removeprefix("YARA (слабое): ")
+    if reason.startswith("YARA (проверить): "):  # engine.CHECK_PREFIX: только вторая очередь
+        return "suspicious", ("Проверить: YARA (вторая очередь): "
+                              + reason.removeprefix("YARA (проверить): "))
     if reason.startswith("hash match"):
         return "threat", "Угроза: хэш в базе сигнатур" + reason.removeprefix("hash match")
     return "threat", "Угроза: " + reason

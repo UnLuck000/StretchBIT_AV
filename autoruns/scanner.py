@@ -429,8 +429,15 @@ def assess(e: Entry, ctx: Context) -> None:
             level = raise_level(level, "suspicious")
             flags.append("подпись недействительна")
         elif e.sig_status == "unsigned":
-            level = raise_level(level, "check")
-            flags.append("нет подписи")
+            import ownproc
+            if ownproc.is_own_file(exe):
+                # служба, задание и пункт Проводника самой программы (любой версии) из
+                # закрытой папки установки: подписи нет (сертификата пока нет), но это не повод
+                # «проверить» (комментарий 15.11.2026: «программа детектит саму себя»)
+                e.sig = "StretchBIT (своя программа)"
+            else:
+                level = raise_level(level, "check")
+                flags.append("нет подписи")
     elif e.kind in ("run", "startup", "service", "task", "winlogon"):
         level = raise_level(level, "check")
         flags.append("файл не найден")

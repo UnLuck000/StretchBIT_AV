@@ -4,12 +4,12 @@ from pathlib import Path
 from scanner import media, overrides, verdict_cache
 from scanner.hashing import data_hashes, file_hashes
 from scanner.heuristics import analyze_pe, get_threshold
-from scanner.relations import signed_partner, weak_match
+from scanner.relations import CONFIRM, STRONG, WEAK, rule_tier, signed_partner, weak_match
 from scanner.yara_engine import match_details, rules_version
 from scanner.signature import (INVALID, REVOKED, UNSIGNED, VALID, check_revocation, trusted_fast,
                                inspect_signature)
 
-ENGINE_VERSION = "8"
+ENGINE_VERSION = "9"  # 15.11.2026: две очереди правил YARA, кэш правил «YARA» без YARA
 # файлы до этого размера читаются один раз: хэши, YARA и эвристика берут байты из памяти
 ONE_READ_LIMIT = 32 * 1024 * 1024  # меняется вместе с логикой проверки: старые вердикты в кэше не годятся
 
@@ -114,6 +114,38 @@ LAUNCHER_SCHEMES = ("steam", "com.epicgames.launcher", "uplay", "origin", "origi
 _URL_RE = re.compile(rb"^\s*URL\s*=\s*([a-z0-9.+\-]+):", re.I | re.M)
 
 
+# причина-«подозрительно» от слабых правил YARA (инструменты, нежелательное): начинается с
+# «YARA» — исключения программ из слоя yara (overrides.filter_reason) действуют и на неё
+WEAK_PREFIX = "YARA (слабое): "
+
+
+# только вторая очередь, подписи нет или недействительна — «проверить» (не угроза)
+CHECK_PREFIX = "YARA (проверить): "
+
+
+def reason_level(reason: str) -> str:
+    """Уровень причины движка без интерфейса (как analyzer.folderview.classify)."""
+    if reason.startswith(("Heuristic", WEAK_PREFIX, CHECK_PREFIX)):
+        return "suspicious"
+    return "threat"
+
+
+def compiled_rules(p: Path, data: bytes | None = None) -> bool:
+    """Скомпилированные правила YARA (кэш yara_*.bin программы, заголовок «YARA»): в них
+    строки всех правил, и правила совпадают сами с собой — полная проверка 15.11.2026 нашла
+    десятки «угроз» в старых кэшах из Корзины. Только не исполняемые файлы: скрипт с «YARA»
+    в начале так YARA не обойдёт. Хэши такие файлы проходят как обычно."""
+    if p.suffix.lower() in media.EXECUTABLE_EXTS:
+        return False
+    if data is not None:
+        return data[:4] == b"YARA"
+    try:
+        with open(p, "rb") as f:
+            return f.read(4) == b"YARA"
+    except OSError:
+        return False
+
+
 def launcher_shortcut(p: Path, data: bytes | None = None) -> bool:
     """Интернет-ярлык (.url), который открывает известную программу: Steam, Epic, Discord..."""
     if p.suffix.lower() != ".url":
@@ -157,23 +189,35 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
         sig = trusted_fast(p, inspect_signature(p), revocation)
         if sig.status == VALID:
             return None
-    if rules is not None:
+    # вторая очередь (15.11.2026): нашла первая (YARA, эвристика) — тоже угроза; первая не
+    # нашла — «проверить», если подписи нет или она недействительна; подпись действительна —
+    # не учитывается
+    confirm: list[str] = []
+    if rules is not None and not compiled_rules(p, data):
         matches = match_details(rules, p, data=data)
         if matches and launcher_shortcut(p, data):
             # ярлык игры (steam://rungameid/...): правила «Methodology» ловят любую схему,
             # кроме http — это способ запуска, а не признак вредоноса
             matches = [m for m in matches if not m.rule.startswith("Methodology_")]
-        if matches:
+        tiers = {m.rule: rule_tier(m) for m in matches}
+        confirm = [m.rule for m in matches if tiers[m.rule] == CONFIRM]
+        first = [m for m in matches if tiers[m.rule] != CONFIRM]
+        if first:
             sig = sig or _trusted_signature(p, inspect_signature(p), revocation)
+            names = ", ".join(m.rule for m in first)
+            also = f" (подтверждают: {', '.join(confirm)})" if confirm else ""
             if sig.status == REVOKED:
-                return "YARA: " + ", ".join(m.rule for m in matches) + " [сертификат отозван]"
+                return "YARA: " + names + also + " [сертификат отозван]"
             # действительная подпись доверенного издателя (Microsoft, JetBrains...):
             # совпадение правила считается ложным, как и у эвристики ниже
             if sig.status != VALID:
-                if all(weak_match(m) for m in matches):
+                if all(weak_match(m) or tiers[m.rule] == WEAK for m in first):
                     partner = _partner(p)
                 if not partner:
-                    return "YARA: " + ", ".join(m.rule for m in matches)
+                    strong = any(tiers[m.rule] == STRONG for m in first)
+                    # слабые правила (инструменты, нежелательное) в одиночку — подозрительно;
+                    # подтверждённые второй очередью — угроза
+                    return ("YARA: " if strong or confirm else WEAK_PREFIX) + names + also
     if heuristics:
         report = analyze_pe(p, data)
         if report.score >= threshold:
@@ -186,7 +230,19 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
                 return None  # библиотека подписанной программы из той же папки
             note = {UNSIGNED: " [нет подписи]", INVALID: " [подпись недействительна]",
                     REVOKED: " [сертификат отозван]"}
+            if confirm:  # эвристика + правило второй очереди — угроза
+                return (f"YARA: {', '.join(confirm)} (подтверждено эвристикой: "
+                        f"{report.summary()}){note.get(sig.status, '')}")
             return "Heuristic: " + report.summary() + note.get(sig.status, "")
+    if confirm:
+        # первая очередь ничего не нашла: совпадение второй — «проверить», не угроза; при
+        # действительной подписи (или библиотеке подписанной программы) — не учитывается
+        sig = sig or _trusted_signature(p, inspect_signature(p), revocation)
+        if sig.status != VALID:
+            if partner is False:
+                partner = _partner(p)
+            if not partner:
+                return CHECK_PREFIX + ", ".join(confirm)
     return None
 
 

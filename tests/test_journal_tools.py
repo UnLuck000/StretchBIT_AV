@@ -99,6 +99,7 @@ def test_scan_extras_by_mode(monkeypatch):
             return count
         return stage
     monkeypatch.setattr(extras, "scan_autoruns", stub("autoruns", 5))
+    monkeypatch.setattr(extras, "scan_memory", stub("memory", 40))  # не настоящие процессы
     monkeypatch.setattr(extras, "scan_usb", stub("usb", 1))
     monkeypatch.setattr(extras, "scan_drivers", stub("drivers", 300))
     monkeypatch.setattr(extras, "scan_extensions", stub("extensions", 12))
@@ -110,12 +111,13 @@ def test_scan_extras_by_mode(monkeypatch):
     stats, cancel = fullscan.Stats(), threading.Event()
     collect = lambda *args: found.append(args)  # noqa: E731
     fullscan.run_extras("quick", stats, None, None, None, collect, cancel, lambda t: None)
-    assert called == ["autoruns"] and stats.autoruns == 5
-    assert found == [("", "suspicious", "autoruns", fullscan.STAGE_AUTORUNS)]
+    assert called == ["autoruns", "memory"] and (stats.autoruns, stats.processes) == (5, 40)
+    assert found == [("", "suspicious", "autoruns", fullscan.STAGE_AUTORUNS),
+                     ("", "suspicious", "memory", fullscan.STAGE_MEMORY)]
     called.clear()
     stats = fullscan.Stats()
     fullscan.run_extras("full", stats, None, None, None, collect, cancel, lambda t: None)
-    assert called == ["autoruns", "usb", "drivers", "extensions", "bcd"]
+    assert called == ["autoruns", "memory", "usb", "drivers", "extensions", "bcd"]
     assert (stats.autoruns, stats.usb, stats.drivers, stats.extensions, stats.bcd) == (
         5, 1, 300, 12, 1)
     assert found[-1][3] == fullscan.STAGE_BCD

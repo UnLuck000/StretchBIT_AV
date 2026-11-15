@@ -19,6 +19,8 @@ def _prepare():
     folder = core.data_dir()
     import userdata
     userdata.set_root(folder)
+    from ui import settings as cfg
+    cfg.store()  # общий QSettings — в главном потоке службы (ui/settings._SharedSettings)
     from diag import log as diag_log
     diag_log.LOG_FILE = diag_log.LOG_DIR / "service.log"
     diag_log.setup(worker=True)

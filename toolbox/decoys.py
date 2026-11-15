@@ -348,7 +348,7 @@ class DecoyWatcher:
             if exe and _signed(exe):
                 continue
             import ownproc
-            if ownproc.is_program(pid, exe or None):
+            if ownproc.is_own_process(pid, exe or None):  # и другая версия программы
                 continue  # окно программы и её проверка дисков (служба — отдельный процесс)
             return {"pid": pid, "name": name, "exe": exe, "written": delta}
         return None

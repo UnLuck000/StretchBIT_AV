@@ -170,6 +170,7 @@ def scan_memory(on_found, cancel: threading.Event, say=lambda text: None,
                 workers: int | None = None) -> int:
     """Память всех процессов правилами «memory»; число проверенных процессов."""
     from processmanager import memcache, ntsnap
+    import ownproc
     from processmanager.memscan import get_rules, kernel_process, scan_process
     from scanner.signature import VALID, inspect_signature
     from scanner.yara_engine import rules_version
@@ -187,6 +188,8 @@ def scan_memory(on_found, cancel: threading.Event, say=lambda text: None,
         exe = ntsnap._exe_by_kernel(raw.pid)
         if kernel_process(raw.pid, raw.ppid, exe):
             continue
+        if ownproc.is_own_process(raw.pid, exe):
+            continue  # своя программа (служба, окно): в памяти — правила YARA, совпали бы сами
         procs.append(_Proc(raw.pid, raw.ppid, raw.name, exe, raw.created))
 
     def work(p: _Proc):
