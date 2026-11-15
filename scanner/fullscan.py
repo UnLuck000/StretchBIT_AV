@@ -1,4 +1,4 @@
-"""Полная проверка диска: обход всех папок и проверка файлов в рабочих процессах (pool).
+r"""Полная проверка диска: обход всех папок и проверка файлов в рабочих процессах (pool).
 
 Чтобы не тратить часы на данные игр, обход пропускает то, в чём не бывает исполняемого
 кода, но что весит больше всего:
@@ -10,13 +10,12 @@
 (программа под чужим расширением), он проверяется как обычно. В папке игры ресурс без
 загрузчика не запустится, а загрузчики (exe, dll) проверяются всегда. Видео и аудио распознаёт pool (media.py).
 
-Быстрая проверка (mode="quick", quick_plan) — только системный диск:
-• файлы прямо в корне диска, в Windows, System32 и SysWOW64 (без вложенных папок) — до
-  QUICK_SYSTEM_LIMIT (16 МБ);
-• папка текущего пользователя (%USERPROFILE%) целиком — файлы до QUICK_USER_LIMIT (32 МБ),
-  с теми же пропусками ресурсов игр, что и у полной.
-Перед файлами (scanner/extras.py): быстрая проверяет весь автозапуск, полная — автозапуск,
-проверку системы и память запущенных процессов.
+Быстрая проверка (mode="quick", quick_plan) — только системные папки (с 15.11.2026 без папки
+пользователя и корня диска): файлы Windows, System32, System32\drivers и SysWOW64 (без
+вложенных папок) и Windows\Temp целиком — до QUICK_SYSTEM_LIMIT (16 МБ).
+Кроме файлов (scanner/extras.py): обе проверяют весь автозапуск и память процессов; полная ещё — флешки
+(вирус-ярлык), уязвимые драйверы, расширения браузеров, BCD, политики и блокировки реестра.
+Находка сообщается с названием этапа (STAGE_*): окно итогов группирует по ним.
 """
 import ctypes
 import os
@@ -30,9 +29,18 @@ from pathlib import Path
 from monitor import EXECUTABLE_EXTS
 
 DATA_LIMIT = 256 * 1024 * 1024  # файл данных крупнее — пропускается (если в нём нет MZ)
-QUICK_SYSTEM_LIMIT = 16 * 1024 * 1024  # быстрая: файлы корня диска и папок Windows меньше
-QUICK_USER_LIMIT = 32 * 1024 * 1024    # быстрая: файлы папки пользователя меньше
+QUICK_SYSTEM_LIMIT = 16 * 1024 * 1024  # быстрая: файлы системных папок меньше
 BATCH = 256                     # файлов в одном обращении к pool: результаты идут потоком
+
+# этапы проверки: название этапа приходит вместе с находкой (on_found)
+STAGE_FILES = "Файлы"
+STAGE_AUTORUNS = "Автозапуск"
+STAGE_MEMORY = "Память процессов"
+STAGE_USB = "Флешки"
+STAGE_DRIVERS = "Драйверы"
+STAGE_EXTENSIONS = "Расширения браузеров"
+STAGE_BCD = "Загрузка (BCD)"
+STAGE_POLICIES = "Политики и блокировки"
 
 # архивы ресурсов и данные игровых движков: в них нет исполняемого кода
 ASSET_EXTS = {
@@ -134,10 +142,18 @@ class Stats:
     threats: int = 0
     suspicious: int = 0
     autoruns: int = 0        # записей автозапуска проверено
-    checks: int = 0          # проверок системы
     processes: int = 0       # процессов, чья память проверена
+    usb: int = 0             # флешек проверено на вирус-ярлык
+    drivers: int = 0         # драйверов проверено
+    extensions: int = 0      # расширений браузеров
+    bcd: int = 0             # 1 — записи загрузки проверены
+    policies: int = 0        # ограничений в реестре найдено (до исключений)
+    stages: list[str] = field(default_factory=list)        # выполненные этапы (STAGE_*)
+    stage_errors: list[str] = field(default_factory=list)  # «этап: ошибка»
+    roots: list[str] = field(default_factory=list)          # что обходилось
     current: str = ""        # папка (или этап), который сейчас идёт
     started: float = field(default_factory=time.time)
+    finished: float = 0.0
 
 
 def is_game_dir(path: str, names: set[str]) -> bool:
@@ -203,13 +219,14 @@ class QuickRoot:
 
 
 def quick_plan() -> list[QuickRoot]:
-    """Быстрая проверка: корень системного диска, Windows, System32, SysWOW64 — только их
-    файлы (до 16 МБ); папка пользователя — целиком (до 32 МБ)."""
+    """Быстрая проверка — системные папки: файлы Windows, System32, System32\\drivers и
+    SysWOW64 (без вложенных папок), Windows\\Temp целиком; всё до 16 МБ."""
     windows = os.environ.get("SystemRoot", os.path.join(system_drive(), "Windows"))
+    system32 = os.path.join(windows, "System32")
     plan = [QuickRoot(p, False, QUICK_SYSTEM_LIMIT)
-            for p in (system_drive(), windows, os.path.join(windows, "System32"),
+            for p in (windows, system32, os.path.join(system32, "drivers"),
                       os.path.join(windows, "SysWOW64"))]
-    plan.append(QuickRoot(os.path.expanduser("~"), True, QUICK_USER_LIMIT))
+    plan.append(QuickRoot(os.path.join(windows, "Temp"), True, QUICK_SYSTEM_LIMIT))
     return [q for q in plan if os.path.isdir(q.path)]
 
 
@@ -278,11 +295,13 @@ def walk(root: str, stats: Stats, cancel: threading.Event, recursive: bool = Tru
 def run(roots: list[str], on_progress, on_found, cancel: threading.Event,
         mode: str = "full") -> Stats:
     """Полная (mode="full") проверка дисков roots или быстрая ("quick": quick_plan, roots не
-    нужны). on_progress(stats) — пачками, on_found(path, level, text)."""
+    нужны). on_progress(stats) — пачками, on_found(path, level, text, stage)."""
     from analyzer.folderview import classify, rules_and_bases
     from scanner import pool as scan_pool
 
     stats = Stats()
+    plan = quick_plan() if mode == "quick" else [QuickRoot(r, True, None) for r in roots]
+    stats.roots = [item.path for item in plan]
     signatures, rules, whitelist = rules_and_bases()
     last = 0.0
 
@@ -299,51 +318,64 @@ def run(roots: list[str], on_progress, on_found, cancel: threading.Event,
             if level in ("threat", "suspicious"):
                 stats.threats += level == "threat"
                 stats.suspicious += level == "suspicious"
-                on_found(path, level, text)
+                on_found(path, level, text, STAGE_FILES)
             if time.monotonic() - last >= 0.5:
                 last = time.monotonic()
                 on_progress(stats)
 
-    def found(path, level, text):
+    def found(path, level, text, stage):
         stats.threats += level == "threat"
         stats.suspicious += level == "suspicious"
-        on_found(path, level, text)
+        on_found(path, level, text, stage)
 
     def say(text):
         stats.current = text
         on_progress(stats)
 
     run_extras(mode, stats, signatures, rules, whitelist, found, cancel, say)
-    plan = quick_plan() if mode == "quick" else [QuickRoot(r, True, None) for r in roots]
+
     def queued(paths):
         for path in paths:
             stats.queued += 1
             yield path
 
+    if not cancel.is_set():
+        stats.stages.append(STAGE_FILES)
     for item in plan:
         check(queued(walk(item.path, stats, cancel, item.recursive, item.limit)))
         if cancel.is_set():
             break
+    stats.finished = time.time()
     on_progress(stats)
     return stats
 
 
 def run_extras(mode, stats, signatures, rules, whitelist, found, cancel, say) -> None:
-    """Автозапуск (обе проверки), проверка системы и память (полная). Сбой этапа не
-    останавливает проверку файлов: он попадает в находки как ошибка этапа."""
+    """Этапы кроме файлов: обе — автозапуск и память; полная ещё — флешки, драйверы, расширения, BCD,
+    политики. found(path, level, text, stage). Сбой этапа не останавливает проверку
+    файлов: он попадает в stats.stage_errors."""
     from scanner import extras
-    stages = [("автозапуск", lambda: setattr(stats, "autoruns", extras.scan_autoruns(
-        signatures, rules, whitelist, found, cancel, say)))]
-    if mode == "full":
-        stages += [("проверка системы", lambda: setattr(stats, "checks", extras.scan_system(
-                       found, cancel, say))),
-                   ("память процессов", lambda: setattr(stats, "processes", extras.scan_memory(
-                       found, cancel, say)))]
-    for title, stage in stages:
+
+    def stage_found(stage):
+        return lambda path, level, text: found(path, level, text, stage)
+
+    stages = [(STAGE_AUTORUNS, "autoruns", lambda f: extras.scan_autoruns(
+        signatures, rules, whitelist, f, cancel, say)),
+              (STAGE_MEMORY, "processes", lambda f: extras.scan_memory(f, cancel, say))]
+    if mode != "quick":
+        stages += [(STAGE_USB, "usb", lambda f: extras.scan_usb(stats.roots, f, cancel, say)),
+                  (STAGE_DRIVERS, "drivers", lambda f: extras.scan_drivers(f, cancel, say)),
+                  (STAGE_EXTENSIONS, "extensions",
+                   lambda f: extras.scan_extensions(f, cancel, say)),
+                  (STAGE_BCD, "bcd", lambda f: extras.scan_bcd(f, cancel, say)),
+                  (STAGE_POLICIES, "policies", lambda f: extras.scan_policies(f, cancel, say))]
+    for title, attr, stage in stages:
         if cancel.is_set():
             return
         try:
-            stage()
+            setattr(stats, attr, stage(stage_found(title)))
+            stats.stages.append(title)
         except Exception as e:
             stats.errors += 1
+            stats.stage_errors.append(f"{title}: {e}")
             say(f"{title}: не выполнено ({e})")

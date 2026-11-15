@@ -1,6 +1,8 @@
 r"""Защиты с правами в службе (шаги 2–4 service/DESIGN.md): контроль запуска (ETW
 Kernel-Process), защита от стилеров (ETW Kernel-File), сервер AMSI, журнал блоков скриптов
-PowerShell (ETW, событие 4104) и сетевые датчики — DNS (ETW DNS-Client) и TLS (WinDivert).
+PowerShell (ETW, событие 4104), наблюдение за памятью процессов (scanner/memwatch.py: потоки в
+чужих процессах и новая исполняемая память) и сетевые датчики — DNS (ETW DNS-Client) и TLS
+(WinDivert).
 
 Работают в процессе службы, пока включена защита файлов (как раньше в окне), каждая — по своей
 настройке (config.json службы, ключ guards). Находки служба пишет в журнал защиты сама
@@ -21,8 +23,8 @@ import threading
 import time
 import uuid
 
-GUARDS = ("launch", "stealer", "amsi", "pslog")
-DEFAULTS = {"launch": True, "stealer": True, "amsi": False, "pslog": True}
+GUARDS = ("launch", "stealer", "amsi", "pslog", "memwatch")
+DEFAULTS = {"launch": True, "stealer": True, "amsi": False, "pslog": True, "memwatch": True}
 ALARM_TIMEOUT = 600.0   # с: тревога стилера без ответа окна — процесс отпускается
 ACTIONS = ("kill", "allow", "once")
 
@@ -82,10 +84,28 @@ def log_pslog(info: dict) -> None:
                   story, pid)
 
 
+def log_memwatch(info: dict) -> None:
+    """Внедрение кода: в журнал защиты — процесс-жертва; сводка — по жертве и по тому, кто
+    создал поток (он обычно уже завершился)."""
+    from recovery import threatlog
+    pid = int(info.get("pid") or 0)
+    story = story_of(pid)
+    creator = int(info.get("creator_pid") or 0)
+    if creator:
+        other = story_of(creator)
+        story = (story + "\n\n" if story else "") + \
+            f"Создатель потока — {info.get('creator_name', '?')} (PID {creator}):\n" + \
+            (other or info.get("creator_exe", "") or "нет сведений")
+    level = "threat" if info.get("level") == "threat" else "suspicious"
+    threatlog.add(info.get("exe") or f"{info.get('name', '')} (PID {pid})", level,
+                  info.get("text", ""), "Память процессов", story, pid)
+
+
 class GuardHost:
     """emit(kind, payload) — событие окнам (ServiceCore.emit_data). factories — для тестов:
     {"launch": f(on_event), "stealer": f(on_alarm, on_status), "amsi": f(on_event),
-    "pslog": f(on_event), "dns": f(on_query, on_status), "tls": f(on_hello, on_status)}."""
+    "pslog": f(on_event), "memwatch": f(on_event), "dns": f(on_query, on_status),
+    "tls": f(on_hello, on_status)}."""
 
     def __init__(self, emit, factories: dict | None = None, wake=None):
         self.emit = emit
@@ -296,6 +316,30 @@ class GuardHost:
         except OSError:
             self.log.exception("Журнал защиты: запись не удалась")
         self.emit("guard", {"guard": "pslog", "kind": "found", "info": info})
+
+    # ---------- память процессов ----------
+    def _make_memwatch(self):
+        factory = self.factories.get("memwatch")
+        if factory is None:
+            from scanner.memwatch import MemWatch as factory
+        watch = factory(self._on_memwatch)
+        threading.Thread(target=watch.start, daemon=True, name="svc-memwatch").start()
+        return watch
+
+    def _on_memwatch(self, kind: str, info) -> None:
+        if kind == "status":
+            self._status("memwatch", str(info))
+            return
+        info = jsonable(info)
+        if kind == "found" and isinstance(info, dict):
+            self.log.warning("Память: %s (PID %s) — %s", info.get("name"), info.get("pid"),
+                             info.get("text"))
+            try:
+                log_memwatch(info)
+                info["logged"] = True
+            except OSError:
+                self.log.exception("Журнал защиты: запись не удалась")
+        self.emit("guard", {"guard": "memwatch", "kind": kind, "info": info})
 
     # ---------- сетевые датчики ----------
     def set_net(self, on: bool) -> None:

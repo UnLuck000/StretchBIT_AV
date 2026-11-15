@@ -2,14 +2,18 @@
 
 • Быстрая: весь автозапуск — реестр, папки автозагрузки, службы, планировщик, WMI (как
   сканер автозапуска: файлы записей — через scanner.pool, подписи и признаки — assess).
-• Полная: автозапуск, проверка системы (hosts, прокси, WinHTTP, обновления, брандмауэр, BCD,
-  ограничения реестра — recovery.checks) и память запущенных процессов (YARA по приватной
-  памяти, как «Сканировать память» в диспетчере процессов: системные неизменившиеся процессы
-  берутся из memcache, совпадение у подписанной программы — «проверить», не угроза).
+• Полная (с 15.11.2026): тот же автозапуск, флешки (вирус-ярлык, autorun.inf, скрытые скрипты — usbguard.scan),
+  уязвимые драйверы (база LOLDrivers — scanner.drivers), расширения браузеров
+  (toolbox.extensions, только опасные), записи загрузки BCD (recovery.checks.check_bcd),
+  политики и блокировки реестра (recovery.policies: запрет диспетчера задач, DisallowRun,
+  перехват IFEO...). hosts и прокси в полной больше нет.
+• Обе: память запущенных процессов (YARA по приватной памяти, как «Сканировать память» в
+  диспетчере процессов: системные неизменившиеся процессы берутся из memcache, совпадение у
+  подписанной программы — «проверить», не угроза).
 
 Каждый этап сообщает найденное через on_found(path, level, text): path — файл (можно
-поместить в карантин) или пустая строка (запись системы, процесс без файла). Записи
-из исключений (автозапуск, проверка системы) не показываются, как и в их окнах.
+поместить в карантин) или пустая строка (запись системы, драйвер, расширение). Записи
+из исключений (автозапуск, проверка системы, драйверы) не показываются, как и в их окнах.
 """
 import os
 import threading
@@ -17,16 +21,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-
-@dataclass
-class ExtraStats:
-    autoruns: int = 0       # записей автозапуска проверено
-    checks: int = 0         # проверок системы выполнено
-    processes: int = 0      # процессов, чья память проверена
-
-
 AUTORUN_LEVELS = {"threat": "threat", "suspicious": "suspicious"}  # «проверить» — не находка
 CHECK_LEVELS = {"bad": "threat", "warning": "suspicious"}
+DRIVER_LEVELS = {"danger": "threat", "warning": "suspicious"}
+USB_LEVELS = {"threat": "threat", "suspicious": "suspicious"}
 
 
 def scan_autoruns(signatures, rules, whitelist, on_found, cancel: threading.Event,
@@ -51,7 +49,7 @@ def scan_autoruns(signatures, rules, whitelist, on_found, cancel: threading.Even
             break
         try:
             assess(e, ctx)
-        except Exception:
+        except Exception:  # noqa: S110 — одна непонятная запись не обрывает этап
             continue
         level = AUTORUN_LEVELS.get(e.level)
         if level:
@@ -60,22 +58,103 @@ def scan_autoruns(signatures, rules, whitelist, on_found, cancel: threading.Even
     return len(entries)
 
 
-def scan_system(on_found, cancel: threading.Event, say=lambda text: None) -> int:
-    """Проверка системы (как в центре восстановления); число выполненных проверок."""
+def scan_usb(roots: list[str], on_found, cancel: threading.Event,
+             say=lambda text: None) -> int:
+    """Съёмные диски из roots: признаки вируса-ярлыка (сами файлы флешки проверяет обход
+    диска). Число проверенных флешек."""
+    from scanner.fullscan import drives
+    from usbguard.scan import scan_drive
+    wanted = {os.path.normcase(r.rstrip("\\/")) for r in roots}
+    done = 0
+    for drive in drives():
+        if cancel.is_set():
+            break
+        if not drive.removable or os.path.normcase(drive.root.rstrip("\\/")) not in wanted:
+            continue
+        say(f"Флешка {drive.root[:2]}: ярлыки, autorun.inf, скрытые папки...")
+        report = scan_drive(drive.root, drive.label)
+        done += 1
+        for f in report.findings:
+            level = USB_LEVELS.get(f.level)
+            if level:
+                on_found(f.path if os.path.isfile(f.path) else "", level,
+                         f"флешка {drive.root[:2]}: {f.title} ({f.path})")
+    return done
+
+
+def scan_drivers(on_found, cancel: threading.Event, say=lambda text: None) -> int:
+    """Драйверы системы по базе LOLDrivers; число проверенных драйверов."""
+    from scanner import drivers
+    say("Уязвимые драйверы: читаю список...")
+    db = drivers.load_db()
+    if not len(db):
+        say("Уязвимые драйверы: базы LOLDrivers ещё нет")
+        return 0
+    found = drivers.list_drivers()
+    excluded = drivers.excluded_hashes()
+    say(f"Уязвимые драйверы: проверяю ({len(found)})...")
+    done = 0
+    for d in found:
+        if cancel.is_set():
+            break
+        drivers.check(d, db, excluded)
+        done += 1
+        level = DRIVER_LEVELS.get(d.level)
+        if level:
+            service = f", служба {d.service}" if d.service else ""
+            # путь не передаётся: драйвер в карантин из журнала не убирают (система может
+            # не загрузиться) — для этого окно «Уязвимые драйверы» (отключение с откатом)
+            on_found("", level, f"драйвер {d.path}{service}: {d.verdict()}")
+    return done
+
+
+def scan_extensions(on_found, cancel: threading.Event, say=lambda text: None) -> int:
+    """Расширения браузеров; находка — только «опасное» (как красные строки в окне
+    «Расширения браузеров»). Число расширений."""
+    from toolbox import extensions
+    say("Расширения браузеров...")
+    items = extensions.all_extensions()
+    for ext in items:
+        if cancel.is_set():
+            break
+        level, reasons = ext.risk
+        if level == "danger":
+            name = ext.name or ext.ext_id
+            on_found("", "suspicious", f"расширение {ext.browser} ({ext.profile}): {name} "
+                                       f"[{ext.ext_id}] — " + "; ".join(reasons))
+    return len(items)
+
+
+def scan_bcd(on_found, cancel: threading.Event, say=lambda text: None) -> int:
+    """Записи загрузки (тестовый режим подписи, отключённая проверка целостности...)."""
     from recovery import checks
     from scanner import exclusions
-    say("Проверка системы: hosts, прокси, обновления, брандмауэр, BCD, политики...")
-    results = checks.run_all()
+    say("Записи загрузки BCD...")
     data = exclusions.load()
-    for findings in results.findings.values():
-        for f in findings:
-            level = CHECK_LEVELS.get(f.level)
-            if level and not exclusions.matches(data, "checks", exclusions.finding_key(f)):
-                on_found("", level, f"Проверка системы: {f.title} — {f.status}")
-    for hit in results.hits:
+    findings = checks.check_bcd()
+    for f in findings:
+        level = CHECK_LEVELS.get(f.level)
+        if level and not exclusions.matches(data, "checks", exclusions.finding_key(f)):
+            on_found("", level, f"загрузка (BCD): {f.title} — {f.status}")
+    return 0 if cancel.is_set() else 1
+
+
+def scan_policies(on_found, cancel: threading.Event, say=lambda text: None) -> int:
+    """Политики и блокировки в реестре; число найденных (до исключений)."""
+    from recovery import policies
+    from scanner import exclusions
+    say("Политики и блокировки реестра...")
+    data = exclusions.load()
+    hits = policies.scan_restrictions()
+    for hit in hits:
+        if cancel.is_set():
+            break
         if not exclusions.matches(data, "checks", exclusions.hit_key(hit)):
-            on_found("", "suspicious", f"Ограничение в реестре: {hit.title} ({hit.path})")
-    return len(results.findings) + (0 if cancel.is_set() else 1)
+            # UAC и точки восстановления выключены — угроза, остальное — подозрительно
+            level = "threat" if hit.restriction_name in policies.CRITICAL else "suspicious"
+            on_found("", level, f"ограничение в реестре: {hit.title} "
+                                f"({hit.hive}\\{hit.path})")
+    return len(hits)
 
 
 @dataclass

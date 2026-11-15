@@ -78,6 +78,7 @@ DEFAULTS = {
     "protect/pslog": True,          # журнал блоков скриптов PowerShell, событие 4104
                                     # (scanner/pslog.py): вторая линия после AMSI
     "protect/pslog_all": False,     # политика «записывать все блоки» (иначе — подозрительные)
+    "protect/memwatch": True,       # внедрение кода в процессы (scanner/memwatch.py)
     "schedule/enabled": False,      # плановая проверка (scanner/schedule.py)
     "schedule/kind": "full",        # full | quick
     "schedule/period": "1w",        # 1w | 2w | 1m | 3m

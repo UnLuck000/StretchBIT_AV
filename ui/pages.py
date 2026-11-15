@@ -353,6 +353,7 @@ class SettingsPage(_UiPage):
         self.chk_amsi = child(ui, QCheckBox, "chkAmsi")
         self.chk_pslog = child(ui, QCheckBox, "chkPsLog")
         self.chk_pslog_all = child(ui, QCheckBox, "chkPsLogAll")
+        self.chk_memwatch = child(ui, QCheckBox, "chkMemWatch")
         from PySide6.QtWidgets import QTimeEdit
         from scanner import schedule
         self.chk_schedule = child(ui, QCheckBox, "chkSchedule")
@@ -434,6 +435,7 @@ class SettingsPage(_UiPage):
         self.chk_amsi.toggled.connect(lambda v: self._save("protect/amsi", v))
         self.chk_pslog.toggled.connect(lambda v: self._save("protect/pslog", v))
         self.chk_pslog_all.toggled.connect(lambda v: self._save("protect/pslog_all", v))
+        self.chk_memwatch.toggled.connect(lambda v: self._save("protect/memwatch", v))
         self.chk_schedule.toggled.connect(self._on_schedule_enabled)
         self.cmb_schedule_kind.currentIndexChanged.connect(
             lambda i: self._save("schedule/kind", self._kinds[i]))
@@ -529,6 +531,7 @@ class SettingsPage(_UiPage):
         self.chk_amsi.setChecked(cfg.get("protect/amsi"))
         self.chk_pslog.setChecked(cfg.get("protect/pslog"))
         self.chk_pslog_all.setChecked(cfg.get("protect/pslog_all"))
+        self.chk_memwatch.setChecked(cfg.get("protect/memwatch"))
         from PySide6.QtCore import QTime
         from scanner import schedule
         self.chk_schedule.setChecked(cfg.get("schedule/enabled"))

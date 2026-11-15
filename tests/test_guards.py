@@ -171,16 +171,18 @@ def test_schedule_next_run():
 def test_quick_scan_plan(tmp_path, monkeypatch):
     drive, windows, home = tmp_path / "C", tmp_path / "C" / "Windows", tmp_path / "home"
     (windows / "System32" / "deep").mkdir(parents=True)
+    (windows / "System32" / "drivers").mkdir()
+    (windows / "Temp" / "x").mkdir(parents=True)
     (home / "Downloads").mkdir(parents=True)
-    (drive / "root.exe").write_bytes(b"MZ")
+    (drive / "root.exe").write_bytes(b"MZ")                           # корень диска — нет
     (windows / "notes.txt").write_text("x")
     (windows / "System32" / "a.dll").write_bytes(b"MZ")
+    (windows / "System32" / "drivers" / "d.sys").write_bytes(b"MZ")
     (windows / "System32" / "deep" / "inner.dll").write_bytes(b"MZ")  # вложенная — нет
-    (home / "Downloads" / "setup.exe").write_bytes(b"MZ")             # профиль — целиком
+    (windows / "Temp" / "x" / "drop.exe").write_bytes(b"MZ")          # Temp — целиком
+    (home / "Downloads" / "setup.exe").write_bytes(b"MZ")             # профиль — нет
     with open(windows / "big.exe", "wb") as f:
         f.truncate(fullscan.QUICK_SYSTEM_LIMIT)                         # 16 МБ — пропуск
-    with open(home / "Downloads" / "mid.exe", "wb") as f:
-        f.truncate(fullscan.QUICK_SYSTEM_LIMIT)                         # в профиле до 32 МБ
     monkeypatch.setenv("SystemDrive", str(drive))
     monkeypatch.setenv("SystemRoot", str(windows))
     monkeypatch.setattr(os.path, "expanduser", lambda p: str(home))
@@ -189,7 +191,7 @@ def test_quick_scan_plan(tmp_path, monkeypatch):
     for item in fullscan.quick_plan():
         found += list(fullscan.walk(item.path, stats, cancel, item.recursive, item.limit))
     names = sorted(os.path.basename(p) for p in found)
-    assert names == ["a.dll", "mid.exe", "notes.txt", "root.exe", "setup.exe"]
+    assert names == ["a.dll", "d.sys", "drop.exe", "notes.txt"]
     assert fullscan.is_system_drive(str(drive) + os.sep)
 
 

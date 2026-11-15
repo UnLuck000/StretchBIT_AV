@@ -124,6 +124,8 @@ class ProtectionPage(QWidget):
         layout.addWidget(amsi_row)
         pslog_row, self.pslog_label, _ = self._item("🧾", "Журнал скриптов PowerShell", "")
         layout.addWidget(pslog_row)
+        memwatch_row, self.memwatch_label, _ = self._item("🧠", "Память процессов", "")
+        layout.addWidget(memwatch_row)
         layout.addStretch()
         self.also_card = card
         grid.addWidget(card, 0, 1)
@@ -131,17 +133,18 @@ class ProtectionPage(QWidget):
         # ---------- полная проверка ----------
         card, layout = _card("Проверка дисков")
         layout.addWidget(_label(
-            "Полная — все папки и файлы выбранного диска; в папках игр (Steam, Epic, Unity, "
-            "Unreal) проверяются только программы и библиотеки, текстуры и архивы ресурсов "
-            "пропускаются; перед файлами — весь автозапуск, проверка системы и память "
-            "запущенных процессов. Найденное появится в журнале защиты. Расписание — в "
-            "настройках.",
+            "Полная — все папки и файлы выбранного диска (и флешек: вирус-ярлык, "
+            "autorun.inf), весь автозапуск, память процессов, уязвимые драйверы, расширения "
+            "браузеров, записи загрузки BCD, политики и блокировки реестра. В папках игр (Steam, Epic, Unity, Unreal) "
+            "проверяются только программы и библиотеки. Итоги откроются в отдельном окне, "
+            "найденное — ещё и в журнале защиты. Расписание — в настройках.",
             "hint"))
         # быстрая — только для системного диска: видна, когда он выбран (gui.fill_drives)
         self.quick_hint = _label(
-            "Быстрая — системный диск: файлы в корне диска, в папках Windows, System32 и "
-            "SysWOW64 (до 16 МБ, без вложенных папок), вся папка пользователя (файлы до "
-            "32 МБ) и весь автозапуск.", "hint")
+            "Быстрая — системные папки: Windows, System32, System32\\drivers, SysWOW64 "
+            "(файлы до 16 МБ, без вложенных папок), Windows\\Temp, весь автозапуск и память "
+            "процессов.",
+            "hint")
         layout.addWidget(self.quick_hint)
         row = QHBoxLayout()
         self.full_drive = QComboBox()
@@ -275,4 +278,5 @@ class ProtectionPage(QWidget):
             self.stealer_label.setText("Не охраняются: защита выключена.")
             self.amsi_label.setText("Не проверяются: защита выключена.")
             self.pslog_label.setText("Не проверяется: защита выключена.")
+            self.memwatch_label.setText("Не проверяется: защита выключена.")
         self.refit()

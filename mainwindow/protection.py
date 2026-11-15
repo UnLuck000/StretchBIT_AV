@@ -217,6 +217,7 @@ class ProtectionMixin:
             page.stealer_label.setText("Выключена в дополнительных настройках.")
         self._apply_amsi(on)
         self._apply_pslog(on)
+        self._apply_memwatch(on)
         page.refit()
 
     # ---------- AMSI: скрипты перед выполнением ----------
@@ -350,6 +351,50 @@ class ProtectionMixin:
         label.setText("Блоки скриптов PowerShell проверяются по журналу событий — "
                       + ("все" if everything else "подозрительные (все — галочкой в "
                                                   "дополнительных настройках)") + ".")
+
+    # ---------- память процессов: внедрение кода (scanner/memwatch.py) ----------
+    def _apply_memwatch(self, on: bool) -> None:
+        label = self.protection_page.memwatch_label
+        if not (on and cfg.get("protect/memwatch")):
+            if self.memwatch is not None:
+                watch, self.memwatch = self.memwatch, None
+                threading.Thread(target=watch.stop, daemon=True).start()
+            if on:
+                label.setText("Выключено в дополнительных настройках.")
+            return
+        if self.memwatch is not None:
+            return
+        from scanner.memwatch import MemWatch
+        self.memwatch = MemWatch(lambda kind, info: self.memwatch_event.emit(kind, info))
+        threading.Thread(target=self.memwatch.start, daemon=True).start()
+        label.setText("Запускается...")
+
+    def _on_memwatch_event(self, kind: str, info):
+        if kind == "status":
+            self.protection_page.memwatch_label.setText(str(info))
+            self.protection_page.refit()
+            return
+        if kind != "found" or not isinstance(info, dict):
+            return
+        level = "threat" if info.get("level") == "threat" else "suspicious"
+        name, pid = info.get("name", ""), info.get("pid", 0)
+        line = f"[Память] {name} (PID {pid}): {info.get('text', '')}"
+        activity.record("memwatch", line, creator=info.get("creator_exe", ""))
+        if not info.get("logged"):  # служба записала находку сама
+            from service.guards import log_memwatch
+            try:
+                log_memwatch(info)
+            except OSError as e:
+                self._protect_line(f"[Память] журнал защиты: {e}", "", "darkorange")
+        self.protect_journal.refresh()
+        self._protect_line(line, info.get("exe", ""), "red" if level == "threat" else "darkorange")
+        if level == "threat":
+            self.add_event(f"Внедрение кода: {name} (PID {pid})", "threat")
+            if self.tray is not None:
+                self.tray.showMessage(
+                    "Внедрение кода в процесс", f"{name} (PID {pid}): {info.get('text', '')}"
+                    [:240] + "\nЗавершить процесс — в диспетчере процессов.",
+                    QSystemTrayIcon.MessageIcon.Critical, 10000)
 
     def set_pslog_policy(self, on: bool) -> None:
         from scanner import pslog
@@ -773,12 +818,14 @@ class ProtectionMixin:
 
     # ---------- защиты с правами в службе (service/guards.py) ----------
     SERVICE_GUARDS = {"launch": "protect/launch", "stealer": "protect/stealer",
-                      "amsi": "protect/amsi", "pslog": "protect/pslog"}
+                      "amsi": "protect/amsi", "pslog": "protect/pslog",
+                      "memwatch": "protect/memwatch"}
 
     def _service_labels(self) -> dict:
         page = self.protection_page
         return {"launch": page.launch_label, "stealer": page.stealer_label,
-                "amsi": page.amsi_label, "pslog": page.pslog_label}
+                "amsi": page.amsi_label, "pslog": page.pslog_label,
+                "memwatch": page.memwatch_label}
 
     def _apply_service_guards(self) -> None:
         """Настройки защит — службе; подписи на «Защите» — по её состоянию."""
@@ -857,6 +904,8 @@ class ProtectionMixin:
             self._on_amsi_event(info)
         elif guard == "pslog":
             self._on_pslog_event(info)
+        elif guard == "memwatch":
+            self._on_memwatch_event(kind, info)
 
     def toggle_protection(self, force: bool = False):
         """force: выключить и при запрете (возврат состояния после замера ресурсов)."""

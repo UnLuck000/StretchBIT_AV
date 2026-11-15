@@ -165,7 +165,8 @@ class ServiceCore:
         # подставной монитор (тесты) — и защиты подставные: настоящие ETW и AMSI не запускаются
         if guard_factories is None and monitor_factory is not None:
             guard_factories = {name: _NullGuard for name in
-                               ("launch", "stealer", "amsi", "pslog", "dns", "tls")}
+                               ("launch", "stealer", "amsi", "pslog", "memwatch", "dns",
+                                "tls")}
         self._listeners: dict[int, float] = {}   # сеанс Windows → когда окно опрашивало события
         self._woken: dict[int, float] = {}       # сеанс → когда служба запускала в нём окно
         self.window_launcher = _launch_window    # (сеанс) → PID окна; тесты подменяют

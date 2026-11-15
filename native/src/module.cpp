@@ -131,6 +131,47 @@ static py::tuple read_regions(uint32_t pid, size_t max_region, size_t max_total,
     }
     return py::make_tuple(result, next);
 }
+// Отпечаток исполняемой памяти процесса для scanner/memwatch.py: FNV-1a по (адрес, размер,
+// права, тип) всех выделенных исполняемых регионов, без чтения их содержимого, и сколько
+// байт из них приватные. None — процесс не открыть. В Python обход 350 тыс. регионов всех
+// процессов шёл 1,5 с процессорного времени, здесь — в десятки раз быстрее.
+static py::object exec_map(uint32_t pid) {
+    uint64_t hash = 1469598103934665603ULL;
+    uint64_t priv = 0;
+    bool opened = false;
+    {
+        py::gil_scoped_release release;
+        HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+        if (process != nullptr) {
+            opened = true;
+            MEMORY_BASIC_INFORMATION mbi;
+            uint64_t address = 0;
+            auto mix = [&hash](uint64_t value) {
+                for (int i = 0; i < 8; ++i) {
+                    hash ^= (value >> (i * 8)) & 0xFF;
+                    hash *= 1099511628211ULL;
+                }
+            };
+            while (address < 0x7FFFFFFFFFFFULL
+                   && VirtualQueryEx(process, reinterpret_cast<LPCVOID>(address), &mbi,
+                                     sizeof(mbi)) == sizeof(mbi)) {
+                const uint64_t base = reinterpret_cast<uint64_t>(mbi.BaseAddress);
+                const uint64_t size = mbi.RegionSize;
+                if (mbi.State == MEM_COMMIT && (mbi.Protect & 0xF0)) {  // PAGE_EXECUTE*
+                    mix(base);
+                    mix(size);
+                    mix((static_cast<uint64_t>(mbi.Protect) << 32) | mbi.Type);
+                    if (mbi.Type == MEM_PRIVATE) priv += size;
+                }
+                if (size == 0) break;
+                address = base + size;
+            }
+            CloseHandle(process);
+        }
+    }
+    if (!opened) return py::none();
+    return py::make_tuple(hash, priv);
+}
 #endif
 
 PYBIND11_MODULE(_native, m) {
@@ -144,5 +185,7 @@ PYBIND11_MODULE(_native, m) {
     m.def("read_regions", &read_regions, py::arg("pid"), py::arg("max_region"),
           py::arg("max_total"), py::arg("rwx_images") = true, py::arg("start") = 0,
           "Порция приватной памяти процесса для YARA: ([(адрес, bytes)], адрес продолжения)");
+    m.def("exec_map", &exec_map, py::arg("pid"),
+          "Отпечаток исполняемой памяти: (хэш регионов, байт приватной исполняемой) или None");
 #endif
 }

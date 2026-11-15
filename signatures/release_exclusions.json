@@ -57,6 +57,12 @@
       "detail": "C:\\Program Files\\Aspia\\Host\\aspia_host.exe",
       "fp": null,
       "added": "2026-11-11T22:25:19"
+    },
+    "thronecore.exe|sha256:9bb2dc9c9152b6a6bae79d72e3e89cdc756a55bc69c257b3d0183590eb1c0f6c": {
+      "title": "ThroneCore.exe",
+      "detail": "C:\\Utils\\Throne\\ThroneCore.exe",
+      "fp": null,
+      "added": "2026-11-15T12:36:52"
     }
   }
 }

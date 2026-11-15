@@ -68,7 +68,7 @@ def svc(tmp_path, monkeypatch):
     monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal" / "actions.jsonl")
     from service.core import ServiceCore
     FakeGuard.made = {}
-    names = ("launch", "stealer", "pslog", "dns", "tls")
+    names = ("launch", "stealer", "pslog", "memwatch", "dns", "tls")
     core = ServiceCore(tmp_path / "svc", monitor_factory=FakeMonitor,
                        guard_factories={n: factory(n) for n in names} | {"amsi": factory("amsi")})
     yield core
@@ -84,7 +84,7 @@ def events(core, kind):
 def test_guards_follow_protection_and_settings(svc):
     svc.handle(user(), "protection.set", {"on": True})
     state = svc.handle(user(), "guards.state", {})
-    assert set(state["running"]) == {"launch", "stealer", "pslog"}   # AMSI — по галочке
+    assert set(state["running"]) == {"launch", "stealer", "pslog", "memwatch"}  # AMSI — галочкой
     svc.handle(user(), "guards.set", {"amsi": True})
     assert "amsi" in svc.guards.running
     svc.handle(user(), "guards.set", {"launch": False})       # без запрета — можно
@@ -118,6 +118,21 @@ def test_launch_threat_logged_by_service(svc):
     assert threatlog.merged()[0]["path"] == r"C:\Users\x\evil.exe"
     ev = events(svc, "guard")[-1]["data"]
     assert ev["guard"] == "launch" and ev["kind"] == "blocked" and ev["info"]["logged"]
+
+
+def test_memwatch_found_logged_by_service(svc):
+    svc.handle(user(), "protection.set", {"on": True})
+    on_event = FakeGuard.made["memwatch"].callbacks[0]
+    on_event("status", "Память запущенных программ проверяется")
+    on_event("found", {"pid": 0, "name": "explorer.exe", "exe": r"C:\Windows\explorer.exe",
+                       "level": "threat", "matches": ["Shellcode_X"], "reason": "поток",
+                       "text": "память: Shellcode_X — поток", "creator_pid": 0})
+    from recovery import threatlog
+    entry = threatlog.merged()[0]
+    assert entry["path"] == r"C:\Windows\explorer.exe" and entry["level"] == "threat"
+    guard_events = [e["data"] for e in events(svc, "guard") if e["data"]["guard"] == "memwatch"]
+    assert guard_events[0]["kind"] == "status" and svc.guards.status["memwatch"]
+    assert guard_events[-1]["kind"] == "found" and guard_events[-1]["info"]["logged"]
 
 
 def test_stealer_alarm_decisions(svc, monkeypatch):

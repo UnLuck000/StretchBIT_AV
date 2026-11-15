@@ -22,7 +22,7 @@ class ScansMixin:
         self.refresh_dashboard()
 
     def quick_scan(self):
-        """Кнопка главной: быстрая проверка (Windows, Users и программы на дисках)."""
+        """Кнопка главной: быстрая проверка (системные папки и автозапуск)."""
         features.begin("home.quick_scan")
         self.shell.show_page("Защита")
         if self._full_cancel is None:
@@ -184,11 +184,10 @@ class ScansMixin:
             button.setText("Останавливаю...")
             return
         from scanner import fullscan
-        if mode == "quick":  # системный диск и папка пользователя (fullscan.quick_plan)
+        if mode == "quick":  # системные папки (fullscan.quick_plan)
             roots = [item.path for item in fullscan.quick_plan()]
-        elif all_drives:
-            roots = [d.root for d in fullscan.drives() if not d.removable] or \
-                [os.path.abspath(os.sep)]
+        elif all_drives:  # все диски, и флешки тоже
+            roots = [d.root for d in fullscan.drives()] or [os.path.abspath(os.sep)]
         else:
             roots = page.full_drive.currentData() or []
         self._full_mode = mode
@@ -203,7 +202,7 @@ class ScansMixin:
         page.full_status.setVisible(True)
         page.full_status.setToolTip("")
         page.full_status.setText("Загружаю базы...")
-        self._full_found_list: list[str] = []
+        self._full_found_list: list[dict] = []
         title = "Быстрая проверка" if mode == "quick" else "Полная проверка"
         activity.record("full_scan", f"{title} начата: " + ", ".join(roots))
 
@@ -226,8 +225,12 @@ class ScansMixin:
         if stats.game_dirs:
             text += f", папок игр: {len(stats.game_dirs)}"
         extra = [f"записей автозапуска: {stats.autoruns}" if stats.autoruns else "",
-                 "проверка системы выполнена" if stats.checks else "",
-                 f"память процессов: {stats.processes}" if stats.processes else ""]
+                 f"память процессов: {stats.processes}" if stats.processes else "",
+                 f"флешек: {stats.usb}" if stats.usb else "",
+                 f"драйверов: {stats.drivers}" if stats.drivers else "",
+                 f"расширений: {stats.extensions}" if stats.extensions else "",
+                 "BCD" if stats.bcd else "",
+                 "политики реестра" if "Политики и блокировки" in stats.stages else ""]
         if any(extra):
             text += ". Также: " + ", ".join(e for e in extra if e)
         text += f". Угроз: {stats.threats}, подозрительных: {stats.suspicious}."
@@ -249,9 +252,10 @@ class ScansMixin:
             f"{self._full_text(stats)} Идёт {self._duration(stats.started)}.\n"
             f"Сейчас: {stats.current}")
 
-    def _on_full_found(self, path: str, level: str, text: str):
-        where = f"{path}: {text}" if path else text  # запись системы или процесс без файла
-        self._full_found_list.append(where)
+    def _on_full_found(self, path: str, level: str, text: str, stage: str = ""):
+        where = f"{path}: {text}" if path else text  # запись системы, драйвер, расширение
+        self._full_found_list.append({"path": path, "level": level, "text": text,
+                                      "stage": stage, "time": time.strftime("%H:%M:%S")})
         title = "Быстрая проверка" if self._full_mode == "quick" else "Полная проверка"
         threatlog.add(path, level, text, title)
         item = QListWidgetItem(f"{time.strftime('%H:%M:%S')}  [{title}] {where}")
@@ -293,6 +297,10 @@ class ScansMixin:
                 "Папки игр (проверены только программы и библиотеки):\n" + "\n".join(shown)
                 + (f"\n...и ещё {len(stats.game_dirs) - 30}" if len(stats.game_dirs) > 30
                    else ""))
-        activity.record("full_scan", text, found=list(self._full_found_list))
+        activity.record("full_scan", text, found=[
+            f"{f['path']}: {f['text']}" if f["path"] else f["text"]
+            for f in self._full_found_list])
         self.add_event(head, "threat" if stats.threats else "info")
         self.statusBar().showMessage(text, 15000)
+        from ui import scanresult  # итоги — в своём окне (у быстрой и полной — разные)
+        scanresult.show(self._full_mode, stats, list(self._full_found_list), stopped, self)

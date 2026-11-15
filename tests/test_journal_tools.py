@@ -89,17 +89,38 @@ def test_firewall_rule_string():
 
 def test_scan_extras_by_mode(monkeypatch):
     from scanner import extras, fullscan
-    called = []
-    monkeypatch.setattr(extras, "scan_autoruns", lambda *a, **k: called.append("autoruns") or 5)
-    monkeypatch.setattr(extras, "scan_system", lambda *a, **k: called.append("system") or 7)
-    monkeypatch.setattr(extras, "scan_memory", lambda *a, **k: called.append("memory") or 9)
+    called, found = [], []
+
+    def stub(name, count):
+        def stage(*args, **kwargs):
+            called.append(name)
+            on_found = next(a for a in args if callable(a))   # колбэк находок этапа
+            on_found("", "suspicious", name)
+            return count
+        return stage
+    monkeypatch.setattr(extras, "scan_autoruns", stub("autoruns", 5))
+    monkeypatch.setattr(extras, "scan_usb", stub("usb", 1))
+    monkeypatch.setattr(extras, "scan_drivers", stub("drivers", 300))
+    monkeypatch.setattr(extras, "scan_extensions", stub("extensions", 12))
+    monkeypatch.setattr(extras, "scan_bcd", stub("bcd", 1))
+
+    def broken(*a, **k):
+        raise OSError("нет доступа")
+    monkeypatch.setattr(extras, "scan_policies", broken)
     stats, cancel = fullscan.Stats(), threading.Event()
-    fullscan.run_extras("quick", stats, None, None, None, None, cancel, lambda t: None)
+    collect = lambda *args: found.append(args)  # noqa: E731
+    fullscan.run_extras("quick", stats, None, None, None, collect, cancel, lambda t: None)
     assert called == ["autoruns"] and stats.autoruns == 5
+    assert found == [("", "suspicious", "autoruns", fullscan.STAGE_AUTORUNS)]
     called.clear()
-    fullscan.run_extras("full", stats, None, None, None, None, cancel, lambda t: None)
-    assert called == ["autoruns", "system", "memory"]
-    assert (stats.checks, stats.processes) == (7, 9)
+    stats = fullscan.Stats()
+    fullscan.run_extras("full", stats, None, None, None, collect, cancel, lambda t: None)
+    assert called == ["autoruns", "usb", "drivers", "extensions", "bcd"]
+    assert (stats.autoruns, stats.usb, stats.drivers, stats.extensions, stats.bcd) == (
+        5, 1, 300, 12, 1)
+    assert found[-1][3] == fullscan.STAGE_BCD
+    assert stats.stage_errors == [f"{fullscan.STAGE_POLICIES}: нет доступа"]
+    assert fullscan.STAGE_POLICIES not in stats.stages
 
 
 def test_folder_files_stops_over_limit(tmp_path):

@@ -133,13 +133,14 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
     decoy_alarm = Signal(object, object)    # изменённые ловушки, виновник
     shadow_found = Signal(object, object, object)  # файлы, есть версии, снимки (shadow.py)
     full_progress = Signal(object)          # fullscan.Stats во время полной проверки
-    full_found = Signal(str, str, str)      # путь, уровень, текст
+    full_found = Signal(str, str, str, str)  # путь, уровень, текст, этап
     full_done = Signal(object, bool)        # итог, остановлена ли вручную
     launch_event = Signal(str, object)      # контроль запуска: вид, сведения
     stealer_event = Signal(object)          # защита от стилеров: сведения о доступе
     guard_status = Signal(str, str)         # launch | stealer, текст состояния
     amsi_event = Signal(object)             # AMSI: заблокированный или подозрительный скрипт
     pslog_event = Signal(object)            # журнал PowerShell 4104: опасный блок скрипта
+    memwatch_event = Signal(str, object)    # память процессов: вид, сведения (scanner/memwatch)
     release_found = Signal(object, str, bool)  # updatecheck.Release | None, ошибка, вручную
     release_downloaded = Signal(object, str)   # путь установщика | None, ошибка
     systool_failed = Signal(object)         # diag.systool.Failure: системная программа не сработала
@@ -188,9 +189,11 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         self.stealer_guard = None  # toolbox.stealerguard.StealerGuard
         self.amsi_server = None    # scanner.amsi.AmsiServer
         self.pslog_watch = None    # scanner.pslog.ScriptBlockWatch
+        self.memwatch = None       # scanner.memwatch.MemWatch
         self.launch_event.connect(self._on_launch_event)
         self.amsi_event.connect(self._on_amsi_event)
         self.pslog_event.connect(self._on_pslog_event)
+        self.memwatch_event.connect(self._on_memwatch_event)
         self._systool_dialog = None
         self.systool_failed.connect(self._on_systool_failed)
         from diag import systool
@@ -510,7 +513,7 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
             self.apply_guards()
         elif key == "protect/amsi":
             self.set_amsi(bool(value))
-        elif key == "protect/pslog":
+        elif key in ("protect/pslog", "protect/memwatch"):
             self.apply_guards()
         elif key == "protect/pslog_all":
             self.set_pslog_policy(bool(value))
@@ -590,7 +593,8 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         if self._service_pump is not None:
             self._service_pump.stop()
         self.decoy_watcher.stop()
-        for guard in (self.launch_guard, self.stealer_guard, self.amsi_server, self.pslog_watch):
+        for guard in (self.launch_guard, self.stealer_guard, self.amsi_server, self.pslog_watch,
+                      self.memwatch):
             if guard is not None:
                 guard.stop()
         vpn_window = self.tool_windows.get("vpn")
@@ -691,11 +695,17 @@ def _argument(name: str) -> str | None:
 
 
 if __name__ == "__main__":
+    from ui import screenfit
+    _ui_scale = screenfit.apply_scale()  # экран меньше Full HD — всё мельче (до QApplication)
     app = QApplication(sys.argv)
     from diag import crash, edition, resources, uiaudit
     crash.install_qt_messages()
     _freeze_watch = crash.FreezeWatch()
     uiaudit.install(app)
+    screenfit.install(app)  # окно при показе — не больше экрана
+    if _ui_scale != 1.0:
+        _dlog.info("Экран %.0f×%.0f меньше Full HD: интерфейс уменьшен, множитель %s",
+                   *screenfit.screen_size(), _ui_scale)
     features.install_dialog_hook()
     install_message_box_limits()  # длинные команды и пути не растягивают окна сообщений
     apply_theme(app, cfg.get("general/theme"))
