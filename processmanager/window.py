@@ -14,9 +14,9 @@ from PySide6.QtWidgets import (
 
 from processmanager.colors import BY_ID, CATEGORIES, classify, text_color
 from scanner import cpucores
-from scanner.signature import VALID, inspect_signature
 from processmanager import memcache
-from processmanager.memscan import MemResult, get_rules, kernel_process, scan_process
+from processmanager.memscan import (MemResult, by_signature, get_rules, kernel_process,
+                                     scan_process)
 from scanner.yara_engine import rules_version
 from processmanager.memview import InjectionScanDialog, MemoryDialog
 from processmanager.origin import FILTERS, HELP, ORIGINS
@@ -732,15 +732,9 @@ class ProcessWindow(QMainWindow):
                 return p, cached
             res = scan_process(rules, p.pid, full=full)
             memcache.store(p, rules_key, fp, res)
-            if res.status == "match" and p.exe:
-                # в памяти подписанных программ (IDE, браузеры, мессенджеры) бывают любые
-                # строки, вплоть до текста правил: такое совпадение — повод проверить, а не угроза
-                try:
-                    if inspect_signature(Path(p.exe)).status == VALID:
-                        res.status = "signed"
-                except OSError:
-                    pass
-            return p, res
+            # в памяти подписанных программ (IDE, браузеры, мессенджеры) бывают любые строки,
+            # вплоть до текста правил: такое совпадение — повод проверить, а не угроза
+            return p, by_signature(res, p.exe)
 
         done = 0
         workers = int(cfg.get("scan/workers"))
@@ -768,7 +762,7 @@ class ProcessWindow(QMainWindow):
             self._fill(item, p)
             if res.status == "match":
                 self._scan_matches.append(f"{p.name} (PID {p.pid}): {', '.join(res.matches)}")
-            elif res.status == "signed":
+            elif res.status in ("signed", "check"):
                 self._scan_signed.append(f"{p.name} (PID {p.pid}): {', '.join(res.matches)}")
 
     def on_mem_done(self, cancelled: bool):

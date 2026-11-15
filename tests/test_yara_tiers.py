@@ -99,3 +99,29 @@ def test_release_overrides_keep_rules_in_second_queue():
     data = json.loads(release.read_text(encoding="utf-8"))  # conftest подменяет RELEASE_FILE
     assert {"Extract_MachineKey_SharePoint", "Impacket"} <= set(data["confirm"])
     assert not {"Extract_MachineKey_SharePoint", "Impacket"} & set(data["rules"])
+
+
+def test_memory_second_queue(confirm_list, monkeypatch):
+    from processmanager import memscan
+    confirm_list["confirm"]["Windows_Rootkit_WinDivert_25991186"] = {}
+    assert memscan.match_status([]) == "clean"
+    assert memscan.match_status(["Windows_Rootkit_WinDivert_25991186"]) == "check"
+    assert memscan.match_status(["Windows_Rootkit_WinDivert_25991186", "Trojan_X"]) == "match"
+    import scanner.signature as signature
+    monkeypatch.setattr(signature, "inspect_signature", lambda path: SimpleNamespace(status="valid"))
+    res = memscan.by_signature(memscan.MemResult("check", ["W"]), r"C:\x\winws.exe")
+    assert res.status == "clean"                            # подписан — вторая не учитывается
+    res = memscan.by_signature(memscan.MemResult("match", ["T"]), r"C:\x\app.exe")
+    assert res.status == "signed"
+    monkeypatch.setattr(signature, "inspect_signature", lambda path: SimpleNamespace(status="unsigned"))
+    res = memscan.by_signature(memscan.MemResult("check", ["W"]), r"C:\x\winws.exe")
+    assert res.status == "check" and res.text().startswith("Проверить (вторая очередь YARA)")
+
+
+def test_windivert_rules_in_second_queue():
+    import json
+    from pathlib import Path
+    release = Path(__file__).resolve().parent.parent / "signatures" / "release_overrides.json"
+    confirm = set(json.loads(release.read_text(encoding="utf-8"))["confirm"])
+    assert {"Windows_Rootkit_WinDivert_25991186", "Windows_Rootkit_WinDivert_26562049",
+            "WinDivert_Driver", "redSails_EXE"} <= confirm

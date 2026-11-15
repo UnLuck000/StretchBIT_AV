@@ -102,7 +102,7 @@ def kernel_process(pid: int, ppid: int, exe: str) -> bool:
 
 @dataclass
 class MemResult:
-    status: str  # clean | match | signed | denied | timeout | error | kernel | own
+    status: str  # clean | match | signed | check | denied | timeout | error | kernel | own
     # signed: совпадение в процессе с действительной подписью — скорее ложное
     matches: list[str] = field(default_factory=list)
     message: str = ""
@@ -119,6 +119,8 @@ class MemResult:
             return "Найдено: " + ", ".join(self.matches)
         if self.status == "signed":
             return "Проверить (программа подписана): " + ", ".join(self.matches)
+        if self.status == "check":
+            return "Проверить (вторая очередь YARA): " + ", ".join(self.matches)
         if self.status == "timeout":
             return "Таймаут" + (": " + ", ".join(self.matches) if self.matches else "")
         if self.status == "denied":
@@ -241,7 +243,33 @@ def scan_process(rules, pid: int, timeout: int = SCAN_TIMEOUT, full: bool = Fals
         del regions
         if not start or scanned >= MAX_TOTAL:
             break
-    return MemResult("match" if found else "clean", found, scanned=scanned)
+    return MemResult(match_status(found), found, scanned=scanned)
+
+
+def match_status(found: list[str]) -> str:
+    """clean | match | check: совпали только правила второй очереди (overrides «confirm»:
+    WinDivert, правила с ложными срабатываниями) — «проверить», не угроза; вместе с правилом
+    первой очереди — угроза (15.11.2026)."""
+    if not found:
+        return "clean"
+    return "check" if all(overrides.rule_confirm(r) for r in found) else "match"
+
+
+def by_signature(res: MemResult, exe: str) -> MemResult:
+    """Подпись программы процесса: совпадение у подписанной — «проверить» (signed), только
+    вторая очередь у подписанной — не учитывается (чисто)."""
+    if res.status not in ("match", "check") or not exe:
+        return res
+    from pathlib import Path
+
+    from scanner.signature import VALID, inspect_signature
+    try:
+        valid = inspect_signature(Path(exe)).status == VALID
+    except OSError:
+        return res
+    if valid:
+        res.status = "clean" if res.status == "check" else "signed"
+    return res
 
 
 def _scan_full(rules, pid: int, timeout: int) -> MemResult:

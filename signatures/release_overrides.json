@@ -9,6 +9,26 @@
       "added_at": "2026-11-15T14:53:24",
       "note": "ложное: любая строка impacket.* — в плагине Python для PyCharm (intellij.python.community.impl.jar)",
       "source": "bartblaze"
+    },
+    "WinDivert_Driver": {
+      "added_at": "2026-11-15T15:43:42",
+      "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
+      "source": "signature-base"
+    },
+    "Windows_Rootkit_WinDivert_25991186": {
+      "added_at": "2026-11-15T15:43:42",
+      "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
+      "source": "elastic"
+    },
+    "Windows_Rootkit_WinDivert_26562049": {
+      "added_at": "2026-11-15T15:43:42",
+      "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
+      "source": "elastic"
+    },
+    "redSails_EXE": {
+      "added_at": "2026-11-15T15:43:42",
+      "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
+      "source": "signature-base"
     }
   },
   "files": {

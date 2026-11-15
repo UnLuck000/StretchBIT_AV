@@ -275,7 +275,7 @@ class MemWatch:
         """True — найдено совпадение правил."""
         self.scans += 1
         result = self._scan(proc["pid"])
-        if result is None or result.status not in ("match", "signed"):
+        if result is None or result.status not in ("match", "signed", "check"):
             return False
         level = "threat" if result.status == "match" else "suspicious"
         info = {"pid": proc["pid"], "name": proc["name"], "exe": proc.get("exe", ""),
@@ -296,22 +296,12 @@ class MemWatch:
         return get_rules("memory")
 
     def _scan_memory(self, pid: int):
-        from processmanager.memscan import scan_process
-        from scanner.signature import VALID, inspect_signature
+        from processmanager.memscan import by_signature, scan_process
         rules = self._rules_for_memory()
         if rules is None:
             return None
-        result = scan_process(rules, pid)
-        if result.status == "match":
-            exe = self._exe(pid)
-            if exe:
-                try:
-                    from pathlib import Path
-                    if inspect_signature(Path(exe)).status == VALID:
-                        result.status = "signed"  # подписанная программа: проверить
-                except OSError:
-                    pass
-        return result
+        # подписанная программа: совпадение — «проверить», только вторая очередь — чисто
+        return by_signature(scan_process(rules, pid), self._exe(pid))
 
     # ---------- процессы ----------
     @staticmethod

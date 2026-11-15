@@ -19,7 +19,6 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from pathlib import Path
 
 AUTORUN_LEVELS = {"threat": "threat", "suspicious": "suspicious"}  # «проверить» — не находка
 CHECK_LEVELS = {"bad": "threat", "warning": "suspicious"}
@@ -171,8 +170,7 @@ def scan_memory(on_found, cancel: threading.Event, say=lambda text: None,
     """Память всех процессов правилами «memory»; число проверенных процессов."""
     from processmanager import memcache, ntsnap
     import ownproc
-    from processmanager.memscan import get_rules, kernel_process, scan_process
-    from scanner.signature import VALID, inspect_signature
+    from processmanager.memscan import by_signature, get_rules, kernel_process, scan_process
     from scanner.yara_engine import rules_version
     from ui import settings as cfg
     say("Память процессов: загружаю правила...")
@@ -200,13 +198,7 @@ def scan_memory(on_found, cancel: threading.Event, say=lambda text: None,
             return p, cached
         res = scan_process(rules, p.pid)
         memcache.store(p, rules_key, fp, res)
-        if res.status == "match" and p.exe:
-            try:
-                if inspect_signature(Path(p.exe)).status == VALID:
-                    res.status = "signed"  # подписанная программа: проверить, не угроза
-            except OSError:
-                pass
-        return p, res
+        return p, by_signature(res, p.exe)  # подписанная программа: проверить, не угроза
 
     done = 0
     workers = workers or int(cfg.get("scan/workers"))
@@ -219,7 +211,7 @@ def scan_memory(on_found, cancel: threading.Event, say=lambda text: None,
             done += 1
             if done % 20 == 0:
                 say(f"Память процессов: {done}/{len(procs)}")
-            if res.status in ("match", "signed"):
+            if res.status in ("match", "signed", "check"):
                 level = "threat" if res.status == "match" else "suspicious"
                 on_found(p.exe or "", level,
                          f"память процесса {p.name} (PID {p.pid}): {res.text()}")
