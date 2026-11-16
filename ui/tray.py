@@ -11,7 +11,7 @@ from diag.log import get
 log = get("tray")
 # меню открывается над курсором, «Выход» — последний пункт, прямо под ним: отпускание
 # кнопки или второй щелчок сразу после открытия меню выходом не считаются
-EXIT_GUARD_SEC = 0.6
+EXIT_GUARD_SEC = 0.21
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
