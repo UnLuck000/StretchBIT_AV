@@ -239,11 +239,23 @@ def test_watchdog_respects_setup_and_limit(guard, monkeypatch):
     assert "перезапусков" in guard.decide(7)  # четвёртый раз за 10 минут — нет
 
 
-def test_watchdog_is_off_for_source_runs(monkeypatch):
+def test_watchdog_does_not_restart_source_runs(monkeypatch):
+    """Из исходников сторож запускается, но только возвращает сеть после VPN (--no-restart):
+    остановка отладки не должна перезапускать программу."""
     import selfguard
     monkeypatch.delenv("STRETCHBIT_WATCHDOG", raising=False)
     monkeypatch.delattr("sys.frozen", raising=False)
-    assert not selfguard.allowed() and not selfguard.start()
+    started = []
+
+    class Proc:
+        def poll(self):
+            return None
+    monkeypatch.setattr(selfguard, "_proc", None)
+    monkeypatch.setattr(selfguard.subprocess, "Popen",
+                        lambda args, **k: started.append(args) or Proc())
+    assert not selfguard.allowed() and selfguard.start()
+    assert selfguard.NO_RESTART_ARG in started[0]
+    monkeypatch.setattr(selfguard, "_proc", None)
 
 
 # ---------- быстрый путь: крупная подписанная программа без YARA ----------

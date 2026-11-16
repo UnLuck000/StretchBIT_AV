@@ -11,14 +11,23 @@ diag/crash.py), запускает программу заново в трее �
   * если идёт установка или удаление (метка cache/no_restart или запущен установщик);
   * чаще 3 раз за 10 минут (программа падает сразу при запуске — не зацикливаться).
 
-Работает только в собранной программе (из исходников — при STRETCHBIT_WATCHDOG=1: иначе
-остановка отладки в PyCharm перезапускала бы программу). Настройка protect/selfguard.
+Сеть после VPN (15.11.2026). Программу с подключённым VPN сняли в диспетчере задач: ядра VPN
+завершились вместе с ней (объект задания Windows), а kill switch и подменённый DNS остались —
+интернет был перекрыт, пока программу не запустили вручную. Теперь сторож после нештатного
+завершения сам, до перезапуска, возвращает сеть (recover_network, не дольше NETWORK_BUDGET):
+ядра без родителя, системный прокси, kill switch, DNS адаптеров. Работает всегда — и из
+исходников, и с выключенным перезапуском (protect/selfguard): тогда сторож только
+возвращает сеть.
+
+Перезапуск — только в собранной программе (из исходников — при STRETCHBIT_WATCHDOG=1: иначе
+остановка отладки в PyCharm перезапускала бы программу) и с настройкой protect/selfguard.
 """
 import ctypes
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 import datadirs
@@ -33,11 +42,14 @@ CRASH_LOG = datadirs.LOGS / "crash.log"
 STATE = datadirs.CACHE / "selfguard.json"
 NO_RESTART = datadirs.APP_CACHE / "no_restart"  # ставят установщик и удаление
 INSTALLER_HINTS = ("-setup", "unins0")
+NETWORK_BUDGET = 90.0               # с: на возврат сети после VPN (Celeron: PowerShell медленный)
+NO_RESTART_ARG = "--no-restart"     # сторож только возвращает сеть
 
 _proc: subprocess.Popen | None = None
 
 
 def allowed() -> bool:
+    """Можно ли перезапускать программу (сеть сторож возвращает всегда)."""
     return bool(getattr(sys, "frozen", False)) or os.environ.get("STRETCHBIT_WATCHDOG") == "1"
 
 
@@ -47,15 +59,17 @@ def _command(*args: str) -> list[str]:
     return [sys.executable, str(Path(__file__).resolve().parent / "gui.py"), *args]
 
 
-def start() -> bool:
-    """Запустить сторожа для этого процесса (или убедиться, что он жив)."""
+def start(restart: bool = True) -> bool:
+    """Запустить сторожа для этого процесса (или убедиться, что он жив). restart=False или
+    из исходников — сторож только возвращает сеть после VPN, программу не перезапускает."""
     global _proc
-    if not allowed():
-        return False
     if _proc is not None and _proc.poll() is None:
         return True
+    args = ["--watchdog", str(os.getpid())]
+    if not (restart and allowed()):
+        args.append(NO_RESTART_ARG)
     try:
-        _proc = subprocess.Popen(_command("--watchdog", str(os.getpid())),
+        _proc = subprocess.Popen(_command(*args),
                                  creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, close_fds=True)
@@ -168,10 +182,55 @@ def decide(pid: int) -> str:
     return "restart"
 
 
-def watch(pid: int) -> None:
-    """Тело процесса-сторожа (gui.py --watchdog <PID>)."""
+def recover_network(budget: float = NETWORK_BUDGET, steps=None) -> list[str]:
+    """Вернуть сеть после аварийного завершения с VPN: что вернули (и что не успели).
+    Каждый шаг — в своём потоке, весь возврат — не дольше budget секунд."""
+    if steps is None:
+        from vpn import dnsguard, killswitch, procguard, xray
+        steps = [("ядра VPN без программы", procguard.kill_orphans),
+                 ("kill switch", killswitch.recover),
+                 ("DNS адаптеров", dnsguard.recover),
+                 ("системный прокси", xray.recover_proxy)]
+    deadline = time.monotonic() + budget
+    report = []
+    for title, step in steps:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            report.append(f"{title}: не хватило времени")
+            continue
+        result: dict = {}
+
+        def run(step=step, result=result):
+            try:
+                result["value"] = step()
+            except Exception as e:  # noqa: BLE001 — остальные шаги всё равно выполняются
+                result["error"] = e
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(left)
+        if thread.is_alive():
+            report.append(f"{title}: не уложился в {budget:.0f} с")
+        elif "error" in result:
+            report.append(f"{title}: ошибка {result['error']}")
+        elif result.get("value"):
+            report.append(f"{title}: возвращено")
+    return report
+
+
+def watch(pid: int, restart: bool = True) -> None:
+    """Тело процесса-сторожа (gui.py --watchdog <PID> [--no-restart])."""
     _wait(pid)
     time.sleep(1.0)  # выход пишет метку последним действием — дать ей исчезнуть
+    if not abnormal_exit(pid):
+        return
+    try:  # сначала сеть: без этого интернет перекрыт, пока программу не запустят вручную
+        done = recover_network()
+    except Exception as e:  # noqa: BLE001 — перезапуск важнее
+        done = [f"ошибка {e}"]
+    if done:
+        _note(f"программа (PID {pid}) завершена не штатно; сеть после VPN: " + "; ".join(done))
+    if not restart:
+        return
     verdict = decide(pid)
     if not verdict:
         return

@@ -93,7 +93,8 @@ def test_profile_link_changes_are_reported(tmp_path, monkeypatch):
     text = routing.update_source(p, "", data=blob())
     changes = routing.pop_changes()[p.id]
     assert "Российские сайты напрямую: выкл." in changes
-    assert any("Обход: добавлено bank.example" in c for c in changes) and "Обход" in text
+    assert any("Напрямую: добавлено bank.example" in c for c in changes) \
+        and "Напрямую" in text
     with pytest.raises(ValueError, match="https"):
         routing.fetch("http://example.com/list.dat")
 

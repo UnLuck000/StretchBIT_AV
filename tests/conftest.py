@@ -1,5 +1,6 @@
 """Общие настройки тестов."""
 import os
+import sys
 import tempfile
 
 import pytest
@@ -20,6 +21,39 @@ from diag import log as _diag_log  # noqa: E402
 
 _diag_log.LOG_DIR = Path(tempfile.mkdtemp(prefix="sbit-logs-"))
 _diag_log.LOG_FILE = _diag_log.LOG_DIR / "app.log"
+
+# Запущенная служба установленной версии (StretchBITService-test) приостанавливает нити
+# процесса pytest, если тесты читают файлы с «секретными» именами (приманки, Login Data):
+# процесс зависает на первом же долгом time.sleep и прогон кажется сломанным. Не баг
+# тестов — так работает защита от стилеров. Служба останавливается с правами администратора.
+try:
+    import psutil
+    for _p in psutil.process_iter(["name"]):
+        if (_p.info.get("name") or "").lower() == "stretchbit.exe":
+            print("\nВНИМАНИЕ: запущена StretchBIT.exe — служба программы может "
+                  "приостановить тесты (приманки, стилер-охрана) и прогон зависнет. "
+                  "Остановите её с правами администратора: "
+                  "sc stop StretchBITService-test\n", file=sys.stderr, flush=True)
+            break
+except Exception:  # noqa: BLE001, S110 — psutil недоступен: предупреждение не критично
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _free_widgets():
+    """После теста виджеты удаляются, пока QApplication жив: без этого PySide6 изредка
+    падает (access violation) при завершении процесса, если окна дожили до финализации
+    интерпретатора. Без QApplication (чистые тесты) — ничего не делает."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in QApplication.topLevelWidgets():
+        widget.deleteLater()
+    app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 @pytest.fixture(autouse=True)

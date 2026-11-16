@@ -90,6 +90,12 @@ def describe_options(options: dict, apps: list[str] | None = None) -> str:
             if blind:
                 parts.append(f"у {blind} условие «источник» не сработает: в TUN источник "
                              "всегда 127.0.0.1")
+            from vpn import routing
+            sbox = sum(1 for r in options["advanced"]
+                       if any(r.get(k) for k in routing.SBOX_OPTIONS)
+                       or r.get("method") or r.get("no_drop"))
+            if sbox:
+                parts.append(f"у {sbox} параметров действия sing-box (TUN)")
     if options.get("assets"):
         parts.append("свои файлы .dat")
     if apps:
@@ -546,7 +552,8 @@ class SingBoxBackend(Backend):
                     x.SOCKS_PORT, self.xray_exe, ip_mode, apps, opts["block_quic"],
                     opts["block_udp"], str(self._get("vpn/dns_server") or "1.1.1.1"), win_dns,
                     strict_route=self._get("vpn/strict_route") is not False,
-                    tun_address=tun_address), "sing-box.json")
+                    tun_address=tun_address,
+                    advanced=opts.get("advanced") or []), "sing-box.json")
             spath = singbox_config()
             self.log(describe_options(opts, apps))
         except (OSError, ValueError) as e:

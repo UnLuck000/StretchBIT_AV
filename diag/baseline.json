@@ -90,10 +90,11 @@
   "had_run": true
  },
  "win.autoruns": {
-  "verified_at": "2026-11-08 23:46:52",
-  "version": "0.1.0",
+  "verified_at": "2026-11-15 15:50:31",
+  "version": "1.2.0",
   "steps": [],
-  "duration": 15.54,
+  "duration": 12.91,
+  "variant": "",
   "pc": "12th Gen Intel(R) Core(TM) i5-12450H; Windows 26300",
   "note": "",
   "had_run": true

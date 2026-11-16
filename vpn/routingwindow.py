@@ -2,9 +2,10 @@
 
 RoutingCard — карточка раздела: выбор профиля, «Создать», «Дублировать», «Редактировать»,
 «Удалить», «Импорт» (файлы или ссылка), «Экспорт». RoutingEditor — вкладки «Основное»
-(встроенные правила, AdBlock, WARP, ссылка профиля), «Туннель», «Обход», «Блокировать»
-(встроенные строки — только просмотр, свои — правка), «Дополнительно» (правила с полями Xray,
-RuleDialog, «Как JSON»), «Файлы» (свои .dat с ссылками и автообновлением; у Default нет).
+(встроенные правила, AdBlock, WARP, ссылка профиля), «Домены и геометки» (outbound по
+умолчанию и столбцы «Напрямую», «Туннель», «Блокировать», «Обход WARP» — vpn/routingtabs.py),
+«Дополнительно» (правила с условиями: список и редактор выбранного, JSON), «Файлы» (свои .dat
+с ссылками и автообновлением; у Default нет).
 Скачивание и регистрация WARP — в потоке (run_job), окно не замирает.
 """
 import json
@@ -156,105 +157,6 @@ class LinkDialog(QDialog):
         return self.url.text().strip(), self.interval.hours(), bool(self.target.currentData())
 
 
-class RuleDialog(QDialog):
-    """Правило «Дополнительно»: условия (все сразу — «И») и действие."""
-
-    def __init__(self, parent, rule: dict | None = None, warp_on: bool = False):
-        super().__init__(parent)
-        self.setWindowTitle("Правило маршрутизации")
-        self.resize(760, 760)
-        r = routing.normalize_rule(rule or {})
-        layout = QVBoxLayout(self)
-        layout.addWidget(_hint(
-            "Правило срабатывает, когда выполнены ВСЕ заполненные условия; пустые поля не "
-            "проверяются. Правила «Дополнительно» проверяются раньше остальных, сверху вниз. "
-            "Адрес и порт источника в режиме TUN не работают: весь трафик приходит в Xray от "
-            "sing-box с 127.0.0.1 — они для режимов прокси (программы в локальной сети)."))
-        form = QFormLayout()
-        self.name = QLineEdit(r["name"])
-        self.name.setPlaceholderText("необязательно")
-        form.addRow("Название:", self.name)
-        self.enabled = QCheckBox("Включено")
-        self.enabled.setChecked(r["enabled"])
-        form.addRow("", self.enabled)
-        self.outbound = QComboBox()
-        for key, text in routing.OUTBOUNDS.items():
-            self.outbound.addItem(text, key)
-        self.outbound.setCurrentIndex(max(0, self.outbound.findData(r["outbound"])))
-        self.outbound.setToolTip("«Туннель» — через VPN (а с WARP «VPN → WARP» — через WARP); "
-                                 "«Только VPN, без WARP» — мимо WARP" +
-                                 ("" if warp_on else " (WARP в профиле выключен — как «Туннель»)"))
-        form.addRow("Действие:", self.outbound)
-        inbound_row = QHBoxLayout()
-        self.inbound = {}
-        for key, text in routing.INBOUNDS.items():
-            box = QCheckBox(text)
-            box.setChecked(key in r["inbound"])
-            inbound_row.addWidget(box)
-            self.inbound[key] = box
-        inbound_row.addStretch()
-        form.addRow("Входящее (inbound):", inbound_row)
-        self.domain = QPlainTextEdit("\n".join(r["domain"]))
-        self.domain.setPlaceholderText("example.com\nfull:a.example.com\nkeyword:video\n"
-                                       "regexp:\\.ru$\ngeosite:youtube\next:файл.dat:метка")
-        self.domain.setMaximumHeight(110)
-        form.addRow("Домены (domain):", self.domain)
-        self.ip = QPlainTextEdit("\n".join(r["ip"]))
-        self.ip.setPlaceholderText("1.2.3.4\n10.0.0.0/8\ngeoip:ru\next:файл.dat:метка")
-        self.ip.setMaximumHeight(90)
-        form.addRow("Адреса (ip):", self.ip)
-        self.port = QLineEdit(r["port"])
-        self.port.setPlaceholderText("443 или 1000-2000,8080")
-        form.addRow("Порт (port):", self.port)
-        self.source_port = QLineEdit(r["source_port"])
-        form.addRow("Порт источника:", self.source_port)
-        self.network = QComboBox()
-        for key, text in routing.NETWORKS.items():
-            self.network.addItem(text, key)
-        self.network.setCurrentIndex(max(0, self.network.findData(r["network"])))
-        form.addRow("Сеть (network):", self.network)
-        proto_row = QHBoxLayout()
-        self.protocol = {}
-        for key in routing.PROTOCOLS:
-            box = QCheckBox(key)
-            box.setChecked(key in r["protocol"])
-            proto_row.addWidget(box)
-            self.protocol[key] = box
-        proto_row.addStretch()
-        form.addRow("Протокол (protocol):", proto_row)
-        self.source = QPlainTextEdit("\n".join(r["source"]))
-        self.source.setPlaceholderText("192.168.1.10\n192.168.1.0/24")
-        self.source.setMaximumHeight(70)
-        form.addRow("Адрес источника:", self.source)
-        layout.addLayout(form)
-        self.error = QLabel()
-        self.error.setWordWrap(True)
-        self.error.setStyleSheet("color: #c0392b;")
-        self.error.hide()
-        layout.addWidget(self.error)
-        layout.addStretch()
-        layout.addWidget(_buttons(self, "Готово"))
-
-    def rule(self) -> dict:
-        return routing.normalize_rule({
-            "name": self.name.text(), "enabled": self.enabled.isChecked(),
-            "outbound": self.outbound.currentData(),
-            "inbound": [k for k, b in self.inbound.items() if b.isChecked()],
-            "domain": self.domain.toPlainText(), "ip": self.ip.toPlainText(),
-            "port": self.port.text(), "source_port": self.source_port.text(),
-            "network": self.network.currentData(),
-            "protocol": [k for k, b in self.protocol.items() if b.isChecked()],
-            "source": self.source.toPlainText()})
-
-    def accept(self) -> None:
-        problems = routing.rule_problems(self.rule())
-        if problems:
-            self.error.setText("\n".join(problems))
-            self.error.show()
-            return
-        super().accept()
-
-
 class JsonRulesDialog(QDialog):
     """Все правила «Дополнительно» одним списком JSON (поля — как в RuleDialog)."""
 
@@ -264,7 +166,8 @@ class JsonRulesDialog(QDialog):
         self.resize(860, 640)
         layout = QVBoxLayout(self)
         layout.addWidget(_hint(
-            "Список правил. Поля: name, enabled, outbound (proxy | direct | block | vpn), "
+            "Список правил. Поля: name, enabled, outbound (proxy — туннель, direct — напрямую, "
+            "block — блокировать, vpn — обход WARP), "
             "inbound (tun, proxy, local-socks, local-http), domain, ip, port, source_port, "
             "network (tcp, udp, \"tcp,udp\"), protocol (http, tls, quic, bittorrent), source."))
         self.text = QPlainTextEdit(json.dumps(rules, ensure_ascii=False, indent=1))
@@ -452,9 +355,10 @@ class WarpDialog(QDialog):
 
 # ---------------- редактор профиля ----------------
 def builtin_lines(p: routing.RoutingProfile) -> dict[str, list[str]]:
-    """Встроенные правила профиля строками (для вкладок «Туннель», «Обход», «Блокировать»)."""
+    """Встроенные правила профиля строками по столбцам «Домены и геометки» (полупрозрачные
+    под своими строками)."""
     from vpn import xray
-    result = {"rules_direct": [], "rules_proxy": [], "rules_block": []}
+    result = {key: [] for key in routing.RULE_LISTS}
     if p.route_ru:
         result["rules_direct"] += ["# российские сайты (встроенное правило)", *xray.RU_DOMAINS,
                                    "geoip:ru"]
@@ -470,9 +374,16 @@ def builtin_lines(p: routing.RoutingProfile) -> dict[str, list[str]]:
     w = p.warp
     if w.get("enabled") and w.get("chain") == "over_vpn":
         result["rules_proxy"].append("# туннель: VPN → WARP (сайты видят адрес Cloudflare)")
+        result["rules_nowarp"].append("# сюда — через VPN, но мимо WARP")
     elif w.get("enabled"):
         result["rules_proxy"].append("# туннель: WARP → VPN")
-    result["rules_proxy"].append("# всё, что не попало в правила, — в туннель")
+        result["rules_nowarp"].append("# цепочка «WARP → VPN»: обойти WARP нельзя — как туннель")
+    else:
+        result["rules_nowarp"].append("# WARP выключен — строки работают как «Туннель»")
+    if p.default_outbound == "direct":
+        result["rules_direct"].append("# всё, что не попало в правила, — напрямую")
+    else:
+        result["rules_proxy"].append("# всё, что не попало в правила, — в туннель")
     return result
 
 
@@ -480,16 +391,11 @@ class RoutingEditor(QDialog):
     """Профиль маршрутизации: правка копии, «Сохранить» записывает. Файлы и ссылки на них
     меняются сразу (на диске), остальное — по «Сохранить»."""
 
-    TABS = (("rules_proxy", "Туннель", "Через VPN, даже если иначе пошло бы напрямую."),
-            ("rules_direct", "Обход", "Напрямую, мимо VPN."),
-            ("rules_block", "Блокировать", "Соединение отклоняется. Главнее «Туннеля» и "
-                                           "«Обхода»."))
-
     def __init__(self, parent, profile: routing.RoutingProfile, names: list[str],
                  busy: bool = False):
         super().__init__(parent)
         self.setWindowTitle(f"Профиль маршрутизации: {profile.name}")
-        self.resize(1080, 780)
+        self.resize(1240, 800)
         self.p = routing.from_dict(routing.to_dict(profile), profile.id)
         self.names = [n for n in names if n != profile.name]
         layout = QVBoxLayout(self)
@@ -499,11 +405,12 @@ class RoutingEditor(QDialog):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
         self.tabs.addTab(self._tab_main(), "Основное")
-        self.rule_edits = {}
-        self.builtin_views = {}
-        for key, title, hint in self.TABS:
-            self.tabs.addTab(self._tab_rules(key, hint), title)
-        self.tabs.addTab(self._tab_advanced(), "Дополнительно")
+        from vpn.routingtabs import AdvancedTab, DomainsTab
+        self.domains = DomainsTab()
+        self.domains.changed.connect(self._refresh_builtin)
+        self.tabs.addTab(self.domains, "Домены и геометки")
+        self.advanced = AdvancedTab(lambda: self.warp_box.isChecked())
+        self.tabs.addTab(self.advanced, "Дополнительно")
         self.tabs.addTab(self._tab_files(), "Файлы")
         layout.addWidget(_buttons(self))
         self._load()
@@ -590,51 +497,6 @@ class RoutingEditor(QDialog):
         layout.addStretch()
         return page
 
-    def _tab_rules(self, key: str, hint: str) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addWidget(_hint(
-            hint + " По одному на строку. Домен: example.com (с поддоменами), full:example.com "
-            "(точно), keyword:слово, regexp:выражение, geosite:категория, ext:файл.dat:метка. "
-            "Адрес: 1.2.3.4, 10.0.0.0/8, geoip:страна. # — комментарий. Свои правила главнее "
-            "встроенных."))
-        layout.addWidget(_hint("Встроенные (включаются на вкладке «Основное»):"))
-        fixed = QPlainTextEdit()
-        fixed.setReadOnly(True)
-        fixed.setMaximumHeight(170)
-        fixed.setStyleSheet("QPlainTextEdit { background: palette(alternate-base); }")
-        layout.addWidget(fixed)
-        layout.addWidget(_hint("Свои:"))
-        edit = QPlainTextEdit()
-        edit.setPlaceholderText("example.com\ngeosite:youtube\n1.2.3.0/24")
-        layout.addWidget(edit, 1)
-        self.builtin_views[key] = fixed
-        self.rule_edits[key] = edit
-        return page
-
-    def _tab_advanced(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.addWidget(_hint(
-            "Правила с полями маршрутизации Xray, как в Throne: входящее (inbound), домены, "
-            "адреса, порты, сеть, протокол, адрес источника. Проверяются раньше всех остальных, "
-            "сверху вниз; первое подошедшее решает. Двойной щелчок — изменить."))
-        self.adv_table = make_table([("Вкл.", 50), ("Название", 200), ("Действие", 170),
-                                     ("Условие", 400)])
-        self.adv_table.cellDoubleClicked.connect(lambda *_: self._edit_rule())
-        self.adv_table.itemChanged.connect(self._adv_check)
-        layout.addWidget(self.adv_table, 1)
-        row = QHBoxLayout()
-        for text, slot in (("Добавить...", self._add_rule), ("Изменить...", self._edit_rule),
-                           ("Удалить", self._delete_rule), ("Выше", lambda: self._move_rule(-1)),
-                           ("Ниже", lambda: self._move_rule(1)), ("Как JSON...", self._json_rules)):
-            button = QPushButton(text)
-            button.clicked.connect(slot)
-            row.addWidget(button)
-        row.addStretch()
-        layout.addLayout(row)
-        return page
-
     def _tab_files(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -707,15 +569,14 @@ class RoutingEditor(QDialog):
         self.warp_box.blockSignals(True)
         self.warp_box.setChecked(bool(p.warp.get("enabled")))
         self.warp_box.blockSignals(False)
-        for key, edit in self.rule_edits.items():
-            edit.setPlainText("\n".join(getattr(p, key)))
+        self.domains.load(p)
+        self.advanced.load(p.advanced)
         src = p.sources.get("")
         self.source_frame.setVisible(bool(src))
         if src:
             self.source_url.setText(src.get("url", ""))
             self.source_interval.set_hours(src.get("interval", 24))
             self._source_text(src)
-        self._fill_rules()
         self._fill_files()
         self._refresh_builtin()
         self._warp_text()
@@ -735,8 +596,8 @@ class RoutingEditor(QDialog):
             setattr(p, key, box.isChecked())
         p.adblock_url = self.adblock_url.text().strip() or routing.ADBLOCK_URL
         p.warp["enabled"] = self.warp_box.isChecked()
-        for key, edit in self.rule_edits.items():
-            setattr(p, key, [s for s in edit.toPlainText().splitlines() if s.strip()])
+        self.domains.collect(p)
+        p.advanced = self.advanced.collect()
         if p.sources.get("") is not None:
             url, hours = self.source_url.text().strip(), self.source_interval.hours()
             old = p.sources[""]
@@ -749,9 +610,8 @@ class RoutingEditor(QDialog):
             setattr(probe, key, box.isChecked())
         probe.warp = dict(probe.warp, enabled=self.warp_box.isChecked())
         probe.adblock_url = self.adblock_url.text().strip() or routing.ADBLOCK_URL
-        lines = builtin_lines(probe)
-        for key, view in self.builtin_views.items():
-            view.setPlainText("\n".join(lines[key]))
+        probe.default_outbound = self.domains.default.currentData() or "proxy"
+        self.domains.set_builtin(builtin_lines(probe))
 
     def _warp_toggled(self, on: bool) -> None:
         self.p.warp["enabled"] = on
@@ -808,74 +668,6 @@ class RoutingEditor(QDialog):
                 self.source_status.setText(f"Не обновлён: {error}")
 
         run_job(self, lambda: routing.update_source(fresh, ""), done)
-
-    # --- «Дополнительно» ---
-    def _fill_rules(self) -> None:
-        self.adv_table.blockSignals(True)
-        self.adv_table.setRowCount(0)
-        for rule in self.p.advanced:
-            row = self.adv_table.rowCount()
-            self.adv_table.insertRow(row)
-            check = QTableWidgetItem()
-            check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled |
-                           Qt.ItemFlag.ItemIsSelectable)
-            check.setCheckState(Qt.CheckState.Checked if rule.get("enabled", True)
-                                else Qt.CheckState.Unchecked)
-            self.adv_table.setItem(row, 0, check)
-            for col, text in enumerate((rule.get("name") or "—",
-                                        routing.OUTBOUNDS.get(rule.get("outbound"), "Туннель"),
-                                        routing.rule_text(rule)), start=1):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
-                self.adv_table.setItem(row, col, item)
-        self.adv_table.blockSignals(False)
-
-    def _adv_check(self, item: QTableWidgetItem) -> None:
-        if item.column() == 0 and 0 <= item.row() < len(self.p.advanced):
-            self.p.advanced[item.row()]["enabled"] = item.checkState() == Qt.CheckState.Checked
-
-    def _selected_rule(self) -> int:
-        row = self.adv_table.currentRow()
-        return row if 0 <= row < len(self.p.advanced) else -1
-
-    def _add_rule(self) -> None:
-        dialog = RuleDialog(self, None, self.warp_box.isChecked())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.p.advanced.append(dialog.rule())
-            self._fill_rules()
-            self.adv_table.selectRow(len(self.p.advanced) - 1)
-
-    def _edit_rule(self) -> None:
-        row = self._selected_rule()
-        if row < 0:
-            return
-        dialog = RuleDialog(self, self.p.advanced[row], self.warp_box.isChecked())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.p.advanced[row] = dialog.rule()
-            self._fill_rules()
-            self.adv_table.selectRow(row)
-
-    def _delete_rule(self) -> None:
-        row = self._selected_rule()
-        if row >= 0:
-            del self.p.advanced[row]
-            self._fill_rules()
-
-    def _move_rule(self, step: int) -> None:
-        row = self._selected_rule()
-        target = row + step
-        if row < 0 or not 0 <= target < len(self.p.advanced):
-            return
-        rules = self.p.advanced
-        rules[row], rules[target] = rules[target], rules[row]
-        self._fill_rules()
-        self.adv_table.selectRow(target)
-
-    def _json_rules(self) -> None:
-        dialog = JsonRulesDialog(self, self.p.advanced)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.p.advanced = dialog.result
-            self._fill_rules()
 
     # --- файлы ---
     def _fill_files(self) -> None:

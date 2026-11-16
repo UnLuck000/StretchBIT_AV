@@ -8,9 +8,10 @@
 VLESS (TUN, системный и локальный прокси): правила применяет Xray (xray.apply_options).
 
 В профиле: встроенные правила (QUIC, UDP, российские сайты, реклама geosite, AdBlock — список
-AdGuard DNS, скачивается и обновляется раз в сутки), WARP (vpn/warp.py), свои строки
-«Туннель» / «Обход» / «Блокировать» и «Дополнительно» — правила с полями Xray (входящее,
-домены, адреса, порты, сеть, протокол, источник), как в Throne.
+AdGuard DNS, скачивается и обновляется раз в сутки), WARP (vpn/warp.py), outbound по
+умолчанию (default_outbound: туннель или напрямую — для всего, что не попало в правила), свои
+строки «Напрямую» / «Туннель» / «Блокировать» / «Обход WARP» и «Дополнительно» — правила с
+полями Xray (входящее, домены, адреса, порты, сеть, протокол, источник).
 
 Экспорт — .json (без файлов) или .zip (profile.json + files/). Импорт — файлы (профили .json /
 .zip и файлы .dat — несколько сразу) или ссылка (GitHub blob превращается в raw): у ссылки
@@ -49,14 +50,36 @@ ADBLOCK_DAT = "sbit-adblock.dat"
 MAX_FILE = 128 * 1024 * 1024         # файл .dat или профиль по ссылке
 MAX_ADBLOCK = 32 * 1024 * 1024
 INTERVALS = {1: "Каждый час", 12: "Каждые 12 часов", 24: "Каждые 24 часа"}  # + своё (часы)
-OUTBOUNDS = {"proxy": "Туннель", "direct": "Обход (напрямую)", "block": "Блокировать",
-             "vpn": "Только VPN, без WARP"}
+OUTBOUNDS = {"proxy": "Туннель", "direct": "Напрямую", "block": "Блокировать",
+             "vpn": "Обход WARP (только VPN)"}
+DEFAULT_OUTBOUNDS = {"proxy": "Туннель", "direct": "Напрямую"}
+# свои строки профиля: ключ → название столбца «Домены и геометки» (порядок — как в окне)
+RULE_LISTS = {"rules_direct": "Напрямую", "rules_proxy": "Туннель", "rules_block": "Блокировать",
+              "rules_nowarp": "Обход WARP"}
 INBOUNDS = {"tun": "TUN (весь трафик)", "proxy": "Системный прокси",
             "local-socks": "Локальный SOCKS5", "local-http": "Локальный HTTP"}
 NETWORKS = {"": "Любая", "tcp": "TCP", "udp": "UDP", "tcp,udp": "TCP и UDP"}
 PROTOCOLS = ("http", "tls", "quic", "bittorrent")
 RULE_KEYS = ("name", "enabled", "outbound", "inbound", "domain", "ip", "port", "source_port",
-             "network", "protocol", "source")
+             "network", "protocol", "source",
+             # новые условия «Дополнительно» (как в Throne/sing-box; в Xray собираются
+             # в домены с префиксами, ip ::/0 | 0.0.0.0/0 и geoip:private)
+             "ip_version", "domain_suffix", "domain_keyword", "domain_regex",
+             "ip_is_private", "source_ip_is_private",
+             # параметры действия sing-box (route-options / reject): работают ТОЛЬКО в TUN
+             # (системный прокси идёт сразу в Xray, sing-box его не видит); в Xray их нет
+             "override_address", "override_port", "tls_fragment",
+             "tls_fragment_fallback_delay", "tls_record_fragment", "tls_spoof",
+             "tls_spoof_method", "method", "no_drop")
+# «Как подделанный сегмент будет отброшен реальным сервером» (sing-box, TLS spoof)
+SPOOF_METHODS = ("wrong-sequence", "wrong-checksum", "wrong-ack", "wrong-md5",
+                 "wrong-timestamp")
+REJECT_METHODS = ("default", "drop")          # method действия reject (outbound = block)
+# параметры, применяемые в sing-box к любому трафику (действие route-options)
+SBOX_OPTIONS = ("override_address", "override_port", "tls_fragment",
+                "tls_fragment_fallback_delay", "tls_record_fragment", "tls_spoof",
+                "tls_spoof_method")
+DURATION_RE = re.compile(r"^\d+(?:\.\d+)?(?:ms|s|m|h)?$")   # «500ms», «1s», «1m»...
 PORT_RE = re.compile(r"^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$")
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)+"
                        r"[a-z0-9-]{2,63}$")
@@ -74,9 +97,11 @@ class RoutingProfile:
     adblock: bool = False
     adblock_url: str = ADBLOCK_URL
     warp: dict = field(default_factory=warp.default)
+    default_outbound: str = "proxy"                    # proxy | direct: всё остальное
     rules_proxy: list = field(default_factory=list)    # «Туннель»
-    rules_direct: list = field(default_factory=list)   # «Обход»
+    rules_direct: list = field(default_factory=list)   # «Напрямую»
     rules_block: list = field(default_factory=list)    # «Блокировать»
+    rules_nowarp: list = field(default_factory=list)   # «Обход WARP»: через VPN мимо WARP
     advanced: list = field(default_factory=list)       # «Дополнительно»: словари RULE_KEYS
     sources: dict = field(default_factory=dict)        # "" | имя файла → url, interval, ...
     created: float = field(default_factory=time.time)
@@ -110,8 +135,9 @@ class RoutingProfile:
         if self.warp.get("enabled"):
             parts.append("WARP: " + ("VPN → WARP" if self.warp.get("chain") == "over_vpn"
                                      else "WARP → VPN"))
-        own = sum(len(clean_lines(getattr(self, k)))
-                  for k in ("rules_proxy", "rules_direct", "rules_block"))
+        if self.default_outbound == "direct":
+            parts.append("остальное напрямую")
+        own = sum(len(clean_lines(getattr(self, k))) for k in RULE_LISTS)
         if own:
             parts.append(f"своих правил: {own}")
         active = sum(1 for r in self.advanced if r.get("enabled", True))
@@ -170,6 +196,20 @@ def normalize_rule(rule: dict) -> dict:
         r[key] = str(r[key] or "").replace(" ", "")
     r["network"] = r["network"] if r["network"] in NETWORKS else ""
     r["protocol"] = [p for p in _list(r["protocol"]) if p in PROTOCOLS]
+    r["ip_version"] = str(r["ip_version"]) if str(r["ip_version"]) in ("4", "6") else ""
+    for key in ("domain_suffix", "domain_keyword", "domain_regex"):
+        r[key] = _list(r[key])
+    for key in ("ip_is_private", "source_ip_is_private"):
+        r[key] = bool(r[key])
+    # параметры действия sing-box (TUN-only): строки — строками, галочки — bool
+    for key in ("override_address", "tls_fragment_fallback_delay", "tls_spoof"):
+        r[key] = str(r[key] or "").strip()
+    r["override_port"] = str(r["override_port"] or "").strip()
+    r["tls_spoof_method"] = r["tls_spoof_method"] if r["tls_spoof_method"] in SPOOF_METHODS \
+        else ""
+    r["method"] = r["method"] if r["method"] in REJECT_METHODS else ""
+    for key in ("tls_fragment", "tls_record_fragment", "no_drop"):
+        r[key] = bool(r[key])
     return r
 
 
@@ -193,7 +233,44 @@ def rule_problems(rule: dict) -> list[str]:
     for entry in r["domain"]:
         if " " in entry:
             errors.append(f"Домен: «{entry}» с пробелом")
+    for entry in r["domain_regex"]:
+        try:
+            re.compile(entry)
+        except re.error:
+            errors.append(f"Регулярка доменов: «{entry}» — неверное выражение")
+    if r["override_port"] and (not r["override_port"].isdigit()
+                               or not 0 < int(r["override_port"]) <= 65535):
+        errors.append("override_port: одно число 1–65535")
+    for key, title in (("override_address", "override_address"), ("tls_spoof", "tls_spoof")):
+        if r[key] and not ip_valid(r[key]):
+            errors.append(f"{title}: «{r[key]}» — не IP и не домен")
+    if r["tls_fragment_fallback_delay"] and not DURATION_RE.match(
+            r["tls_fragment_fallback_delay"]):
+        errors.append("tls_fragment_fallback_delay: длительность, например «500ms»")
+    if (r["method"] or r["no_drop"]) and r["outbound"] != "block":
+        errors.append("method и no_drop действуют при блокировке: outbound = block")
+    if r["method"] == "drop" and r["no_drop"]:
+        errors.append("no_drop не работает с method = drop (sing-box его отбросит)")
+    if r["tls_fragment"] and r["tls_record_fragment"]:
+        errors.append("tls_fragment и tls_record_fragment взаимоисключающие — оставьте "
+                      "одну из фрагментаций")
     return errors
+
+
+def ip_valid(text: str) -> bool:
+    """IP-адрес, сеть CIDR или имя домена (для проверки полей sing-box)."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(text.strip("[]"))
+        return True
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(text, strict=False)
+        return True
+    except ValueError:
+        pass
+    return bool(DOMAIN_RE.match(text.rstrip(".")))
 
 
 def rule_text(rule: dict) -> str:
@@ -215,6 +292,30 @@ def rule_text(rule: dict) -> str:
         parts.append(NETWORKS[r["network"]])
     if r["protocol"]:
         parts.append(", ".join(r["protocol"]))
+    if r["ip_version"]:
+        parts.append(f"IPv{r['ip_version']} только")
+    for key, title in (("domain_suffix", "суффиксы доменов"), ("domain_keyword", "ключевые слова"),
+                       ("domain_regex", "регулярки доменов")):
+        if r[key]:
+            shown = ", ".join(r[key][:3]) + (f" и ещё {len(r[key]) - 3}" if len(r[key]) > 3
+                                             else "")
+            parts.append(f"{title}: {shown}")
+    if r["ip_is_private"]:
+        parts.append("адрес назначения — частный")
+    if r["source_ip_is_private"]:
+        parts.append("источник — частный")
+    opts = []
+    if r["override_address"] or r["override_port"]:
+        opts.append("адрес → " + r["override_address"] +
+                    (f":{r['override_port']}" if r["override_port"] else ""))
+    if r["tls_fragment"] or r["tls_record_fragment"]:
+        opts.append("фрагментация TLS")
+    if r["tls_spoof"]:
+        opts.append("подмена SNI («" + r["tls_spoof"] + "»)")
+    if r["method"] or r["no_drop"]:
+        opts.append("отклонять" + (f" ({r['method']})" if r["method"] else ""))
+    if opts:
+        parts.append("sing-box: " + ", ".join(opts))
     return "; ".join(parts) or "любой трафик"
 
 
@@ -229,7 +330,9 @@ def from_dict(data: dict, pid: str | None = None) -> RoutingProfile:
         setattr(p, key, bool(getattr(p, key)))
     p.adblock_url = str(p.adblock_url or ADBLOCK_URL)
     p.warp = warp.normalize(p.warp if isinstance(p.warp, dict) else {})
-    for key in ("rules_proxy", "rules_direct", "rules_block"):
+    p.default_outbound = p.default_outbound if p.default_outbound in DEFAULT_OUTBOUNDS \
+        else "proxy"
+    for key in RULE_LISTS:
         value = getattr(p, key)
         setattr(p, key, [str(s) for s in (value.splitlines() if isinstance(value, str)
                                           else value or [])])
@@ -725,7 +828,7 @@ def set_source(p: RoutingProfile, key: str, url: str, interval: int) -> None:
 FLAG_TITLES = {"block_quic": "Блокировать QUIC", "block_udp": "Блокировать UDP",
                "route_ru": "Российские сайты напрямую", "block_ads": "Блокировать рекламу",
                "adblock": "AdBlock"}
-RULE_TITLES = {"rules_proxy": "Туннель", "rules_direct": "Обход", "rules_block": "Блокировать"}
+RULE_TITLES = RULE_LISTS
 CHANGES: dict[str, list[str]] = {}   # id профиля → что изменилось при обновлении по ссылке
 _changes_lock = threading.Lock()
 
@@ -749,6 +852,8 @@ def diff(old: RoutingProfile, new: RoutingProfile) -> list[str]:
             lines.append(f"{title}: добавлено {_short(added)}")
         if removed:
             lines.append(f"{title}: убрано {_short(removed)}")
+    if old.default_outbound != new.default_outbound:
+        lines.append("Outbound по умолчанию: " + DEFAULT_OUTBOUNDS[new.default_outbound])
     if old.advanced != new.advanced:
         lines.append(f"Дополнительно: правил было {len(old.advanced)}, стало "
                      f"{len(new.advanced)}")
@@ -911,8 +1016,9 @@ def options(p: RoutingProfile, log=None, download: bool = True) -> dict:
     """Настройки профиля для xray.apply_options. WARP без ключа — ValueError."""
     say = log or (lambda text: None)
     o = {key: getattr(p, key) for key in ("route_ru", "block_ads", "block_quic", "block_udp")}
-    for kind in ("proxy", "direct", "block"):
-        o[f"rules_{kind}"] = clean_lines(getattr(p, f"rules_{kind}"))
+    for key in RULE_LISTS:
+        o[key] = clean_lines(getattr(p, key))
+    o["default_outbound"] = p.default_outbound
     o["advanced"] = [r for r in p.advanced if r.get("enabled", True)]
     o["ip_files"] = {name for name, kind in file_kinds(p).items() if kind == "geoip"}
     o["adblock"] = adblock_domains(p.adblock_url, say, download) if p.adblock else []

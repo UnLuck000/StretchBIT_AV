@@ -41,9 +41,9 @@ inspections/
 
 # своя база хэшей (удалённые из карантина файлы) — только на этом компьютере
 signatures/hashes.txt
-# словарь орфографии PyCharm и заметки для Claude Code — не для репозитория
+# словарь орфографии PyCharm и файл-память OPENCODE.md — не для репозитория
 dictionaries/
-CLAUDE.md
+OPENCODE.md
 
 # релизная сборка (python build_release.py)
 dist/

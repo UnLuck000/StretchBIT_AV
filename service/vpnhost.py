@@ -22,7 +22,8 @@ from pathlib import Path
 SETTINGS = {"vpn/ip_mode": str, "vpn/killswitch": bool, "vpn/direct_apps": str,
             "vpn/dns_server": str, "vpn/strict_route": bool}
 OPTION_KEYS = {"route_ru", "block_ads", "block_quic", "block_udp", "rules_proxy",
-               "rules_direct", "rules_block", "advanced", "ip_files", "adblock", "warp",
+               "rules_direct", "rules_block", "rules_nowarp", "default_outbound", "advanced",
+               "ip_files", "adblock", "warp",
                "profile", "mux", "fragment", "cert_blocked", "mode", "ip_mode", "dns",
                "assets", "adblock_ext", "adblock_count"}
 KINDS = ("vless", "wireguard", "openvpn")

@@ -6,8 +6,8 @@
 перехват DNS hijack-dns, выбор настоящего адаптера auto_detect_interface — без PowerShell и
 ручных маршрутов), протокол — Xray (поддерживает всё, включая xhttp). Собственные соединения
 Xray к серверу sing-box пропускает напрямую (правило process_name), иначе была бы петля.
-Настройки TUN — по образцу Throne (github.com/throneproj/Throne, src/configs/generate.cpp),
-формат sing-box 1.12+. Нужны права администратора.
+Настройки TUN — как у распространённых клиентов sing-box (auto_route, strict_route,
+hijack-dns), формат sing-box 1.12+. Нужны права администратора.
 """
 import ipaddress
 import os
@@ -21,7 +21,7 @@ TUN_ADDRESS = "172.19.0.1/30"
 TUN_ADDRESS6 = "fdfe:dcba:9876::1/126"
 TUN6_CANDIDATES = ("fdfe:dcba:9876::1/126", "fdfe:dcba:9877::1/126", "fdfe:dcba:9878::1/126",
                    "fdfe:dcba:9879::1/126")
-# 172.19.0.1/30 — адрес sing-box по умолчанию, его же берут Throne, Hiddify, NekoBox: при их
+# 172.19.0.1/30 — адрес sing-box по умолчанию, его же берут другие клиенты sing-box: при их
 # включённом TUN sing-box падал с «set ipv4 address: The object already exists»
 TUN_CANDIDATES = ("172.19.0.1/30", "172.23.231.1/30", "10.211.97.1/30", "192.168.251.1/30")
 
@@ -157,11 +157,158 @@ IPV6_EARLY_REJECT = {
 }
 
 
+def _sb_ports(text: str) -> tuple[list[int], list[str]]:
+    """«443», «1000-2000,8080» → (список портов, диапазоны «a:b» для port_range)."""
+    ports, ranges = [], []
+    for part in (text or "").replace(" ", "").split(","):
+        if "-" in part:
+            a, _, b = part.partition("-")
+            if a.isdigit() and b.isdigit():
+                ranges.append(f"{a}:{b}")
+        elif part.isdigit():
+            ports.append(int(part))
+    return ports, ranges
+
+
+def _sb_domains(rule: dict) -> dict:
+    """Доменные условия правила в поля sing-box: domain (точно), domain_suffix,
+    domain_keyword, domain_regex. geosite:/ext: пропускаются (в sing-box это rule-set),
+    префиксы Xray раскладываются по родным полям."""
+    result: dict[str, list[str]] = {}
+    for entry in rule.get("domain") or []:
+        low = entry.strip().lower()
+        if low.startswith("full:"):
+            result.setdefault("domain", []).append(entry[5:].strip())
+        elif low.startswith("keyword:"):
+            result.setdefault("domain_keyword", []).append(entry[8:].strip())
+        elif low.startswith("regexp:"):
+            result.setdefault("domain_regex", []).append(entry[7:].strip())
+        elif ":" not in low:                    # geosite:/ext: — мимо (rule-set sing-box)
+            result.setdefault("domain_suffix", []).append(entry.strip().strip("."))
+    for key in ("domain_suffix", "domain_keyword", "domain_regex"):
+        entries = [s for s in (rule.get(key) or []) if s.strip()]
+        if entries:
+            result.setdefault(key, []).extend(entries)
+    return {k: v for k, v in result.items() if v}
+
+
+def _sb_ips(entries: list[str]) -> tuple[list[str], bool]:
+    """Адреса → (ip_cidr для sing-box, признак «geoip:private»). geoip:/ext: и не-IP
+    пропускаются: geosite/geoip в sing-box — rule-set, а не поле правила."""
+    cidrs, private = [], False
+    for entry in entries or []:
+        low = entry.strip().lower()
+        if low == "geoip:private":
+            private = True
+            continue
+        if low.startswith(("geoip:", "ext:")):
+            continue
+        import ipaddress
+        try:
+            cidrs.append(str(ipaddress.ip_network(entry, strict=False)))
+        except ValueError:
+            continue
+    return cidrs, private
+
+
+def sbox_rule(rule: dict) -> dict | None:
+    """Правило «Дополнительно» → правило маршрутизации sing-box (для TUN, где sing-box
+    стоит перед Xray). None — правило в sing-box не нужно: нет ни условий, ни параметров.
+
+    Условия — родные поля sing-box (ip_version, network, protocol, домены, ip_cidr,
+    source_ip_cidr, порты, *_is_private); inbound действует, только если там есть TUN.
+    Условие outbound игнорируется: цель правила решает Xray после sing-box.
+    Параметры действия: tls_fragment/... — действие route-options (трафик продолжает
+    сопоставляться и уходит в Xray); при outbound = block — действие reject (method,
+    no_drop), блокирует уже в sing-box. geoip:/geosite:/ext: в sing-box не переносятся
+    (там они rule-set) — правило на таких условиях не строится."""
+    from vpn import routing
+    r = routing.normalize_rule(rule)
+    if r["inbound"] and "tun" not in r["inbound"]:
+        return None                             # правило только для других входящих
+    out: dict = {}
+    # сколько условий задано (условие outbound не переносится: sing-box видит трафик
+    # до того, как Xray выберет цель) — если заданы, а в sing-box не перенёсось ни
+    # одного (geosite:, ext:, geoip:...), правило emit'ить нельзя: параметры попали бы
+    # на весь трафик
+    intended = 0
+    if r["ip_version"]:
+        out["ip_version"] = int(r["ip_version"])
+        intended += 1
+    if r["network"]:
+        out["network"] = r["network"]
+        intended += 1
+    if r["protocol"]:
+        out["protocol"] = list(r["protocol"])
+        intended += 1
+    if r["inbound"]:
+        intended += 1
+        out["inbound"] = ["tun-in"]             # другие входящие в TUN-режиме и так нет
+    domains = _sb_domains(r)
+    if r["domain"] or any(r[k] for k in ("domain_suffix", "domain_keyword", "domain_regex")):
+        intended += 1
+    if domains:
+        out.update(domains)
+    cidrs, private = _sb_ips(r["ip"])
+    if r["ip"]:
+        intended += 1
+    if cidrs:
+        out["ip_cidr"] = cidrs
+    if private or r["ip_is_private"]:
+        out["ip_is_private"] = True
+        intended += 1
+    scidrs, sprivate = _sb_ips(r["source"])
+    if r["source"]:
+        intended += 1
+    if scidrs:
+        out["source_ip_cidr"] = scidrs
+    if sprivate or r["source_ip_is_private"]:
+        out["source_ip_is_private"] = True
+        intended += 1
+    ports, ranges = _sb_ports(r["port"])
+    if r["port"]:
+        intended += 1
+    if ports:
+        out["port"] = ports
+    if ranges:
+        out["port_range"] = ranges
+    sports, sranges = _sb_ports(r["source_port"])
+    if r["source_port"]:
+        intended += 1
+    if sports:
+        out["source_port"] = sports
+    if sranges:
+        out["source_port_range"] = sranges
+    if intended and not out:
+        return None
+    # параметры действия
+    options = {}
+    for key in routing.SBOX_OPTIONS:
+        value = r[key]
+        if value in ("", False, None):
+            continue
+        options[key] = int(value) if key == "override_port" else value
+    if options.get("tls_fragment") and options.get("tls_record_fragment"):
+        # взаимоисключающие (sing-box отклонит конфиг): остаётся record_fragment —
+        # документация советует пробовать сначала его
+        options.pop("tls_fragment")
+    if r["outbound"] == "block" and (r["method"] or r["no_drop"]):
+        # блокировка — уже в sing-box (reject), method/no_drop — его параметры
+        if r["method"]:
+            options["method"] = r["method"]
+        if r["no_drop"] and r["method"] != "drop":
+            options["no_drop"] = True
+        return dict(out, action="reject", **options)
+    if not options:
+        return None                             # без действия правило в sing-box не нужно
+    return dict(out, action="route-options", **options)
+
+
 def build_config(socks_port: int, xray_exe: str, ip_mode: str = "ipv4",
                  direct_apps: list[str] | None = None, block_quic: bool = False,
                  block_udp: bool = False, dns_server: str = "1.1.1.1",
                  windows_dns: dict | None = None, strict_route: bool = True,
-                 tun_address: str | None = None) -> dict:
+                 tun_address: str | None = None, advanced: list[dict] | None = None) -> dict:
     """TUN sing-box → SOCKS5 127.0.0.1:socks_port (Xray).
 
     xray_exe — полный путь: мимо туннеля пропускается только этот файл (не любой xray.exe).
@@ -180,7 +327,11 @@ def build_config(socks_port: int, xray_exe: str, ip_mode: str = "ipv4",
     программам обойти туннель и отправить DNS мимо него; без неё совместимее с другими
     программами, работающими с сетью (виртуальные машины, локальные серверы).
     windows_dns — DNS, заданный вручную в Windows 11 (vpn/windns.py): A-запросы — на его
-    сервер IPv4, AAAA — на сервер IPv6 (тоже через туннель); dns_server — для остального."""
+    сервер IPv4, AAAA — на сервер IPv6 (тоже через туннель); dns_server — для остального.
+    advanced — правила «Дополнительно» профиля: правила с параметрами действия
+    (tls_fragment, override_address, method...) превращаются в правила sing-box
+    (sbox_rule) и действуют до передачи трафика в Xray; системный прокси идёт сразу
+    в Xray, поэтому эти параметры работают только здесь, в TUN."""
     net = "tcp" if block_udp else "udp"
     windows_dns = windows_dns or {}
     # по умолчанию — обычный DNS по UDP через сервер: DoH держит одно долгое соединение
@@ -223,6 +374,9 @@ def build_config(socks_port: int, xray_exe: str, ip_mode: str = "ipv4",
             "rules": [
                 *([IPV6_EARLY_REJECT] if only_ipv4 else []),
                 {"action": "sniff"},
+                # параметры действия из правил «Дополнительно» (route-options/reject):
+                # non-final — трафик после них продолжает сопоставляться и уходит в Xray
+                *[r for r in (sbox_rule(a) for a in advanced or []) if r],
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"process_path": [os.path.normpath(xray_exe)], "outbound": "direct"},
                 *([{"process_path": [os.path.normpath(a) for a in direct_apps],

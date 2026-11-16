@@ -553,8 +553,8 @@ class VpnWindow(QDialog):
         cl.addWidget(_label("Локальный прокси для программ", "title"))
         cl.addWidget(_label("Только с этого компьютера (127.0.0.1): через VPN пойдут лишь "
                             "программы с этим прокси (Telegram, браузер с настройкой прокси, "
-                            "HTTPS_PROXY), остальное — как без VPN. Занятый порт (например, "
-                            "Throne) — VPN подключится без этого прокси.", "hint"))
+                            "HTTPS_PROXY), остальное — как без VPN. Занятый порт (его держит другая "
+                            "программа) — VPN подключится без этого прокси.", "hint"))
         form = QGridLayout()
         self.port_widgets = []
         for row, kind, title in ((0, "socks", "SOCKS5"), (1, "http", "HTTP")):

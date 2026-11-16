@@ -312,9 +312,21 @@ def advanced_rule(rule: dict, mode: str, tunnel: str = "proxy", ip_files=()) -> 
             return None
         out["inboundTag"] = tags
     domains = [domain_entry(d) for d in rule.get("domain") or [] if d.strip()]
+    # domain_suffix/keyword/regex — те же домены Xray с явным префиксом
+    domains += ["domain:" + d.strip().strip(".").lstrip("*.")
+                for d in rule.get("domain_suffix") or [] if d.strip()]
+    domains += ["keyword:" + d.strip() for d in rule.get("domain_keyword") or [] if d.strip()]
+    domains += ["regexp:" + d.strip() for d in rule.get("domain_regex") or [] if d.strip()]
     if domains:
         out["domain"] = domains
     ips = [ip_entry(i) for i in rule.get("ip") or [] if i.strip()]
+    # ip_version 4/6 → вся адресация той версии; ip_is_private → geoip:private
+    if rule.get("ip_version") == "4":
+        ips.append("0.0.0.0/0")
+    elif rule.get("ip_version") == "6":
+        ips.append("::/0")
+    if rule.get("ip_is_private"):
+        ips.append("geoip:private")
     if ips:
         out["ip"] = ips
     if rule.get("port"):
@@ -326,6 +338,11 @@ def advanced_rule(rule: dict, mode: str, tunnel: str = "proxy", ip_files=()) -> 
     if rule.get("protocol"):
         out["protocol"] = list(rule["protocol"])
     sources = [ip_entry(s) for s in rule.get("source") or [] if s.strip()]
+    # source_ip_is_private — частные сети источника (geoip в source не используется:
+    # не во всех сборках Xray он есть для source)
+    if rule.get("source_ip_is_private"):
+        sources += ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+                    "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10"]
     if sources:
         out["source"] = sources
     out["outboundTag"] = {"proxy": tunnel, "vpn": "proxy", "direct": "direct",
@@ -347,8 +364,9 @@ def apply_options(config: dict, v: dict, options: dict, log=None) -> dict:
     """Маршрутизация, блокировки, WARP, Mux и фрагментация в готовой конфигурации Xray.
 
     Порядок правил: DNS самого Xray (для WARP) → сертификат подменён (cert_blocked) →
-    «Дополнительно» (advanced, по порядку) → свои «Блокировать» → «Туннель» → «Обход» →
-    реклама и AdBlock → QUIC/UDP → российские сайты напрямую → остальное в туннель.
+    «Дополнительно» (advanced, по порядку) → свои «Блокировать» → «Обход WARP» → «Туннель» →
+    «Напрямую» → реклама и AdBlock → QUIC/UDP → российские сайты напрямую → остальное — в
+    туннель или напрямую (default_outbound).
     • свои правила (rules_block/proxy/direct): домены (domain:, full:, keyword:, regexp:,
       geosite:, ext:файл:метка...) и адреса (IP, CIDR, geoip:..., ext: файла geoip);
     • route_ru — geosite:category-ru, зоны .ru/.рф/.su, geoip:ru напрямую;
@@ -375,6 +393,8 @@ def apply_options(config: dict, v: dict, options: dict, log=None) -> dict:
         if converted is not None:
             head.append(converted)
     head += _rules_for(options.get("rules_block", []), "block", ip_files)
+    # «Обход WARP»: через VPN, но мимо WARP (при цепочке VPN → WARP); без WARP — как туннель
+    head += _rules_for(options.get("rules_nowarp", []), "proxy", ip_files)
     head += _rules_for(options.get("rules_proxy", []), tunnel, ip_files)
     head += _rules_for(options.get("rules_direct", []), "direct", ip_files)
     if options.get("block_ads"):
@@ -393,6 +413,10 @@ def apply_options(config: dict, v: dict, options: dict, log=None) -> dict:
     if options.get("route_ru"):
         rules.append({"type": "field", "domain": list(RU_DOMAINS), "outboundTag": "direct"})
         rules.append({"type": "field", "ip": ["geoip:ru"], "outboundTag": "direct"})
+    if options.get("default_outbound") == "direct":
+        # outbound по умолчанию «Напрямую»: всё, что не попало в правила, — мимо VPN (иначе
+        # Xray отдаёт его первому исходящему — туннелю)
+        rules.append({"type": "field", "network": "tcp,udp", "outboundTag": "direct"})
     if any(r.get("domain") or r.get("protocol") for r in rules):
         for inbound in config["inbounds"]:  # домен для правил — из трафика, без своего DNS
             if inbound["protocol"] in ("socks", "http", "mixed"):

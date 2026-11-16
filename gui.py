@@ -17,7 +17,8 @@ if "--scan-worker" in sys.argv:  # собранная программа: раб
 if "--watchdog" in sys.argv:  # сторож: перезапуск после нештатного завершения (selfguard.py)
     import selfguard
     try:
-        selfguard.watch(int(sys.argv[sys.argv.index("--watchdog") + 1]))
+        selfguard.watch(int(sys.argv[sys.argv.index("--watchdog") + 1]),
+                        restart=selfguard.NO_RESTART_ARG not in sys.argv)
     except (ValueError, IndexError):
         pass
     sys.exit(0)
@@ -793,10 +794,13 @@ if __name__ == "__main__":
     crash.start_session()  # метка сеанса: аварийный выход заметен при следующем запуске
     links = userdata.remove_links() if is_admin() else []  # см. userdata.remove_links
     import selfguard
-    if cfg.get("protect/selfguard") and not passive:
-        selfguard.start()  # сторож вернёт программу, если её снимут или она упадёт
+    if not passive:
+        # сторож: всегда возвращает сеть после VPN, если программу снимут или она упадёт;
+        # перезапускает её — по настройке protect/selfguard (и только собранную)
+        _restart = bool(cfg.get("protect/selfguard"))
+        selfguard.start(_restart)
         _guard_timer = QTimer()
-        _guard_timer.timeout.connect(selfguard.start)  # сняли сторожа — запустить снова
+        _guard_timer.timeout.connect(lambda: selfguard.start(_restart))  # сняли — снова
         _guard_timer.start(30000)
     features.begin("app.start")
 
