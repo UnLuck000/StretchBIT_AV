@@ -15,6 +15,11 @@
       "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
       "source": "signature-base"
     },
+    "Windows_Hacktool_SharpGPOAbuse_14ea480e": {
+      "added_at": "2026-11-17T01:29:15",
+      "note": "инструмент правки групповых политик SharpGPOAbuse: строки утилиты (GPOName, AddUserTask, ...) встречаются в документации, учебных и административных скриптах — только подтверждает другие находки",
+      "source": "elastic"
+    },
     "Windows_Rootkit_WinDivert_25991186": {
       "added_at": "2026-11-15T15:43:42",
       "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
