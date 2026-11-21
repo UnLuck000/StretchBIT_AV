@@ -46,6 +46,18 @@ def test_update_all_failing_step_still_moves(monkeypatch):
     assert values[-1] == 1.0
 
 
+def test_update_all_partial_and_full(monkeypatch):
+    """update_all различает: всё скачалось (True) и часть не удалась ("partial")."""
+    for name in ("update_ips", "update_domains", "update_drivers", "update_hashes",
+                 "update_threatfox"):
+        monkeypatch.setattr(updater, name, lambda: True)
+    monkeypatch.setattr(updater, "update_virusshare", lambda progress=None, part=None: True)
+    monkeypatch.setattr(updater, "update_rules", lambda part=None: True)
+    assert updater.update_all() is True
+    monkeypatch.setattr(updater, "update_rules", lambda part=None: False)  # один шаг не удался
+    assert updater.update_all() == "partial"
+
+
 def test_dashboard_card(qapp):
     from ui.pages import DashboardPage
     page = DashboardPage()

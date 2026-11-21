@@ -53,7 +53,9 @@ JA3_DIR = NETFEEDS_DIR / "ja3"           # отпечатки TLS-клиенто
 COMMUNITY_RULES_DIR = SIG_DIR / "rules" / "community"
 KEY_FILE = SIG_DIR / ".abusech_key"
 
-UPDATE_INTERVAL = 24 * 3600  # автообновление раз в сутки, секунд
+UPDATE_INTERVAL = 12 * 3600  # автообновление раз в 12 часов
+RETRY_INTERVAL = 4 * 3600    # часть источников не ответила — докачать через столько
+DOWNLOAD_TIMEOUT = 30        # с: таймаут сокета на одну загрузку (зависшее соединение)
 SHA256_RE = re.compile(r"\b[0-9a-fA-F]{64}\b")
 MD5_LINE_RE = re.compile(rb"^[0-9a-fA-F]{32}$")
 MB_URL = "https://mb-api.abuse.ch/v2/files/exports/{key}/{name}"
@@ -66,7 +68,6 @@ VIRUSSHARE_FIRST_GUESS = 505
 VIRUSSHARE_PROBE_TIMEOUT = 15   # с: один HEAD-запрос при поиске последнего списка
 VIRUSSHARE_PROBES = 10          # всего таких запросов за обновление (раньше — до 505)
 VIRUSSHARE_SPAN = 64            # дальше этого от подсказки номер не ищем
-VIRUSSHARE_FILE_TIMEOUT = 90    # с: один список MD5
 VIRUSSHARE_BUDGET = 15 * 60     # с: весь шаг; не успели — остальное в следующий раз
 RULE_SOURCES = {  # папка в community/ -> (архив, часть пути внутри архива)
     "signature-base": ("https://github.com/Neo23x0/signature-base/archive/refs/heads/master.zip",
@@ -116,7 +117,7 @@ def _read_limited(resp, limit: int) -> bytes:
     return raw
 
 
-def _download(url: str, timeout: int = 120, data: bytes | None = None,
+def _download(url: str, timeout: int = DOWNLOAD_TIMEOUT, data: bytes | None = None,
               headers: dict | None = None, limit: int = MAX_DOWNLOAD) -> bytes:
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "StretchBIT-updater/1.0",
                                                           **(headers or {})})
@@ -152,7 +153,7 @@ def _mirror_manifest() -> dict:
     if "error" in _manifest_cache:
         raise MirrorError(_manifest_cache["error"])
     try:
-        data = json.loads(_download(mirror_base() + "manifest.json", timeout=60))
+        data = json.loads(_download(mirror_base() + "manifest.json", timeout=DOWNLOAD_TIMEOUT))
         if data.get("version") != MIRROR_MANIFEST_VERSION or not isinstance(
                 data.get("files"), dict):
             raise MirrorError("незнакомый manifest.json")
@@ -188,7 +189,7 @@ def mirror_file(kind: str) -> bytes:
     name = str(entry.get("name", ""))
     if not re.fullmatch(r"[a-z0-9_-]+-\d{12}\.[a-z]+\.gz", name):
         raise MirrorError("странное имя файла в manifest.json")
-    packed = _download(mirror_base() + name, timeout=300)
+    packed = _download(mirror_base() + name, timeout=DOWNLOAD_TIMEOUT)
     if hashlib.sha256(packed).hexdigest() != str(entry.get("sha256", "")).lower():
         raise MirrorError("SHA-256 не совпал")
     return _gunzip(packed)
@@ -462,7 +463,7 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
                   f"осталось {len(missing) - i + 1}, докачаю в следующий раз")
             break
         try:
-            data = md5_bin(_download(VIRUSSHARE_URL.format(n=n), timeout=VIRUSSHARE_FILE_TIMEOUT))
+            data = md5_bin(_download(VIRUSSHARE_URL.format(n=n), timeout=DOWNLOAD_TIMEOUT))
         except Exception as e:
             failed += 1
             print(f"VirusShare {n:05d}: {_error(e)}")
@@ -485,7 +486,7 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
 RULES_ETAGS = ".etags.json"   # в community/: источник -> ETag последнего разобранного архива
 
 
-def _download_changed(url: str, etag: str, timeout: int = 300) -> tuple[bytes | None, str]:
+def _download_changed(url: str, etag: str, timeout: int = DOWNLOAD_TIMEOUT) -> tuple[bytes | None, str]:
     """Скачать, только если файл изменился: If-None-Match с прежним ETag (архивы GitHub —
     codeload — отвечают 304 без тела). None — не изменился. Сервер, не понявший заголовок,
     но вернувший тот же ETag, тоже «не изменился»: тело тогда не читается."""
@@ -617,7 +618,7 @@ def update_domains() -> bool:
     SSLBL: отпечатки JA3 вредоносных TLS-клиентов (зеркало, затем напрямую)."""
     ok = False
     key = _get_key()
-    direct = (lambda: _download(URLHAUS_EXPORT.format(key=key), timeout=300)) if key else None
+    direct = (lambda: _download(URLHAUS_EXPORT.format(key=key), timeout=DOWNLOAD_TIMEOUT)) if key else None
     try:
         raw, where = _fetch("urlhaus", direct, _marker("URLhaus", 500),
                             prefer_direct=bool(key))
@@ -665,7 +666,7 @@ def update_drivers() -> bool:
     import json
     from scanner.drivers import convert_loldrivers
     try:
-        items = json.loads(_download(LOLDRIVERS_URL, timeout=300))
+        items = json.loads(_download(LOLDRIVERS_URL, timeout=DOWNLOAD_TIMEOUT))
     except Exception as e:
         print(f"LOLDrivers: не удалось скачать: {_error(e)}")
         return False
@@ -676,8 +677,9 @@ def update_drivers() -> bool:
 
 
 # ---------- всё сразу ----------
-def update_all(progress=None, fraction=None) -> bool:
-    """Обновляет все базы. True, если удалось хоть что-то (иначе нет сети).
+def update_all(progress=None, fraction=None):
+    """Обновляет все базы. True — всё скачалось; "partial" — часть источников не ответила
+    (докачиваем через RETRY_INTERVAL); False — не ответил ни один (нет сети).
     progress(текст) — что делается; fraction(доля 0..1) — для шкалы на главной: шаги с
     весами по объёму при первом скачивании (VirusShare — ~110 МБ, правила — десятки МБ),
     внутри правил и VirusShare — по архивам и спискам."""
@@ -699,18 +701,24 @@ def update_all(progress=None, fraction=None) -> bool:
              ("VirusShare", lambda p: update_virusshare(progress=progress, part=p), 60)]
     total = float(sum(weight for _t, _s, weight in steps))
     ok = False
+    failed = False
     for title, step, weight in steps:
         if progress:
             progress(f"Обновляю: {title}...")
         part(weight)(0.0)
         try:
-            ok = step(part(weight)) or ok
+            step_ok = step(part(weight))
         except Exception as e:  # сбой одного источника не мешает остальным
+            step_ok = False
             print(f"{title}: ошибка {_error(e)}")
+        ok = step_ok or ok
+        failed = failed or not step_ok
         done[0] += weight
         if fraction:
             fraction(done[0] / total)
-    return ok
+    if not ok:
+        return False
+    return "partial" if failed else True
 
 
 def bases_missing() -> bool:

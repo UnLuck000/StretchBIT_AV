@@ -232,7 +232,7 @@ class ServiceCore:
             except OSError:
                 self.log.exception("VPN: не удалось вернуть %s после сбоя", name)
 
-    DB_CHECK_INTERVAL = 15 * 60  # с: сама проверка update_due — не чаще раза в сутки
+    DB_CHECK_INTERVAL = 15 * 60  # с: как часто заглядываем в update_due (сам апдейт — по таймеру)
     DB_RETRY = 120               # с: обновление не удалось (сеть ещё не поднялась) — повтор
     DB_RETRIES = 5
 
@@ -254,14 +254,20 @@ class ServiceCore:
             self._db_stop.wait(self.DB_RETRY if retry else self.DB_CHECK_INTERVAL)
 
     def update_bases_if_due(self, now: float | None = None) -> bool | None:
-        """Одна проверка: прошли сутки — обновить базы. None — не пора или нет прав на папку
-        баз; True/False — удалось ли (событие «db» уходит окнам)."""
+        """Одна проверка: прошли UPDATE_INTERVAL (12 ч) — обновить базы; если часть
+        источников не ответила — докачать через RETRY_INTERVAL (4 ч). None — не пора или
+        нет прав на папку баз; True/False — удалось ли (событие «db» уходит окнам)."""
         import contextlib
         import io
 
         import updater
-        if not updater.needs_update(self.config.get("db_last_update", 0.0), now) or \
-                not updater.can_update():
+        now = time.time() if now is None else now
+        if not updater.can_update():
+            return None
+        due = updater.needs_update(self.config.get("db_last_update", 0.0), now)
+        partial = self.config.get("db_partial", 0.0)
+        retry = partial > 0 and now - partial >= updater.RETRY_INTERVAL
+        if not due and not retry:
             return None
         self.log.info("Базы: начинаю автообновление%s",
                       " (баз на диске нет)" if updater.bases_missing() else "")
@@ -280,14 +286,21 @@ class ServiceCore:
         for line in output.getvalue().splitlines():   # раньше — только в service-stdout.log
             if line.strip():
                 self.log.info("Базы: %s", line.strip()[:300])
-        if not ok:
+        if ok is False:
             self.log.warning("Базы: автообновление не удалось — ни один источник не ответил "
                              "(причины — строками выше)")
             self.emit("db", "fail")
+            with self._lock:
+                self.config["db_partial"] = now   # не долбить чаще RETRY_INTERVAL
+                self._save_config()
             return False
         with self._lock:
-            self.config["db_last_update"] = time.time() if now is None else now
+            self.config["db_last_update"] = now
+            self.config["db_partial"] = 0.0 if ok is True else now
             self._save_config()
+        if ok == "partial":
+            self.log.warning("Базы: часть источников не ответила — докачаю через %d ч",
+                             updater.RETRY_INTERVAL // 3600)
         try:
             from analyzer.folderview import reset_bases
             from processmanager.memscan import reset_cache
@@ -299,7 +312,7 @@ class ServiceCore:
         with self._lock:
             if self._monitor is not None:
                 self._monitor.reload_bases()
-        self.log.info("Базы обновлены")
+        self.log.info("Базы обновлены" if ok is True else "Базы обновлены частично")
         self.emit("db", "ok")
         return True
 

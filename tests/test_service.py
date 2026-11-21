@@ -423,3 +423,25 @@ def test_service_updates_missing_bases_and_logs_reasons(core, monkeypatch, caplo
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "баз на диске нет" in text and "CERTIFICATE_VERIFY_FAILED" in text
     assert "VirusShare: список 1 из 50" in text   # ход шага — сразу в журнал, не после
+
+
+def test_service_retries_partial_update_in_four_hours(core, monkeypatch):
+    """Часть источников не ответила (update_all вернул "partial"): базы считаются свежими,
+    но докачка — через RETRY_INTERVAL (4 ч), а не сразу и не через сутки."""
+    import updater
+    monkeypatch.setattr(updater, "can_update", lambda: True)
+    monkeypatch.setattr(updater, "bases_missing", lambda: False)
+    calls = []
+    monkeypatch.setattr(updater, "update_all", lambda progress=None, fraction=None:
+                        calls.append(1) or "partial")
+    t0 = 10 * updater.UPDATE_INTERVAL
+    assert core.update_bases_if_due(now=t0) is True
+    assert core.config["db_last_update"] == t0 and core.config["db_partial"] == t0
+    assert len(calls) == 1
+    # меньше 4 часов и сутки ещё не прошли — не трогаем
+    assert core.update_bases_if_due(now=t0 + updater.RETRY_INTERVAL - 60) is None
+    assert len(calls) == 1
+    # прошло 4 часа — докачка
+    assert core.update_bases_if_due(now=t0 + updater.RETRY_INTERVAL + 60) is True
+    assert len(calls) == 2
+    assert core.config["db_partial"] == t0 + updater.RETRY_INTERVAL + 60

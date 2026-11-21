@@ -154,7 +154,7 @@ def test_virusshare_step_respects_budget(tmp_path, monkeypatch, capsys):
 
 
 def test_virusshare_step_passes_file_timeout(tmp_path, monkeypatch):
-    """Каждый список качается с VIRUSSHARE_FILE_TIMEOUT, а не 300 с."""
+    """Каждый список качается с общим DOWNLOAD_TIMEOUT (30 с), а не 300 с."""
     monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
     monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 511)
     seen = {}
@@ -165,7 +165,7 @@ def test_virusshare_step_passes_file_timeout(tmp_path, monkeypatch):
 
     monkeypatch.setattr(updater, "_download", download)
     assert updater.update_virusshare(files=2) is True
-    assert seen["timeout"] == updater.VIRUSSHARE_FILE_TIMEOUT
+    assert seen["timeout"] == updater.DOWNLOAD_TIMEOUT
     assert len(list((tmp_path / "feeds").glob("virusshare_*.md5.bin"))) == 2
 
 
