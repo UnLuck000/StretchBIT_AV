@@ -20,9 +20,9 @@ class _Resp:
         self.body, self.headers = body, {"ETag": etag}
         self.read_called = False
 
-    def read(self):
+    def read(self, size: int = -1):
         self.read_called = True
-        return self.body
+        return self.body if size < 0 else self.body[:size]
 
     def __enter__(self):
         return self

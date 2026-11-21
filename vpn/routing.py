@@ -177,6 +177,23 @@ def clean_lines(lines) -> list[str]:
     return result
 
 
+def clean_domain(entry: str) -> str:
+    """Домен без оболочки JSON-массива: «"example.com",» → «example.com». Строку можно
+    копировать из конфигурации Throne/Xray (["example.com",]) как есть; префиксы
+    (domain:, full:, keyword:, regexp:, geosite:, ext:) не трогаются."""
+    text = str(entry).strip()
+    for _ in range(2):
+        if text.startswith("["):
+            text = text[1:].strip()
+        if text.endswith("]"):
+            text = text[:-1].strip()
+        if text.endswith(","):
+            text = text[:-1].strip()
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+            text = text[1:-1].strip()
+    return text
+
+
 def _list(value) -> list[str]:
     if isinstance(value, str):
         value = re.split(r"[\n,]+", value)
@@ -192,13 +209,16 @@ def normalize_rule(rule: dict) -> dict:
     r["inbound"] = [i for i in _list(r["inbound"]) if i in INBOUNDS]
     for key in ("domain", "ip", "source"):
         r[key] = _list(r[key])
+    # домен мог быть скопирован из JSON («"example.com",») — оболочку снимаем
+    r["domain"] = [text for text in map(clean_domain, r["domain"]) if text]
     for key in ("port", "source_port"):
         r[key] = str(r[key] or "").replace(" ", "")
     r["network"] = r["network"] if r["network"] in NETWORKS else ""
     r["protocol"] = [p for p in _list(r["protocol"]) if p in PROTOCOLS]
     r["ip_version"] = str(r["ip_version"]) if str(r["ip_version"]) in ("4", "6") else ""
-    for key in ("domain_suffix", "domain_keyword", "domain_regex"):
-        r[key] = _list(r[key])
+    for key in ("domain_suffix", "domain_keyword"):
+        r[key] = [text for text in map(clean_domain, _list(r[key])) if text]
+    r["domain_regex"] = _list(r["domain_regex"])
     for key in ("ip_is_private", "source_ip_is_private"):
         r[key] = bool(r[key])
     # параметры действия sing-box (TUN-only): строки — строками, галочки — bool

@@ -270,7 +270,8 @@ class ServiceCore:
         self.emit("db", "start")
         try:
             with contextlib.redirect_stdout(output):  # updater пишет итог каждого источника
-                ok = updater.update_all(fraction=self._report_db_progress)
+                ok = updater.update_all(progress=self._log_db_step,
+                                        fraction=self._report_db_progress)
         except Exception:  # noqa: BLE001 — сбой обновления не должен остановить службу
             ok = False
             self.log.exception("Базы: автообновление упало")
@@ -308,6 +309,13 @@ class ServiceCore:
             return
         self._db_progress = value
         self.emit("db_progress", data={"value": round(value, 3)})
+
+    def _log_db_step(self, text: str) -> None:
+        """Строка хода обновления (progress) — сразу в журнал службы, а не после update_all:
+        иначе во время долгого шага (VirusShare) в журнале тишина и непонятно, где застряло."""
+        line = (text or "").strip()
+        if line:
+            self.log.info("Базы: %s", line[:300])
 
     def start_pipe(self, name: str | None = None, allowed=None, sddl: str | None = None):
         from service import pipeserver, winapi

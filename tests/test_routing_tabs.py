@@ -152,3 +152,30 @@ def test_singbox_route_options_rule():
     rules = config["route"]["rules"]
     assert any(r.get("action") == "route-options" for r in rules)   # после sniff
     assert any(r.get("action") == "reject" and r.get("method") == "default" for r in rules)
+    # блокировка — раньше отказа IPv6, параметры действия — позже: иначе подмена адреса на
+    # IPv6 в режиме «только IPv4» попадала под reject и соединение рвалось (21.11.2026)
+    reject_at = next(i for i, r in enumerate(rules) if r.get("method") == "default")
+    ipv6_at = next(i for i, r in enumerate(rules)
+                   if r.get("action") == "reject" and r.get("ip_version") == 6)
+    options_at = next(i for i, r in enumerate(rules) if r.get("action") == "route-options")
+    assert reject_at < ipv6_at < options_at
+
+
+def test_pasted_json_domain_entries_are_cleaned():
+    """Домен из JSON-массива (["www.example.ru",]) вставляется как есть: кавычки, скобки и
+    запятая снимаются, иначе правило не совпадает ни в Xray, ни в sing-box (21.11.2026)."""
+    from vpn import singbox
+    rule = routing.normalize_rule({"outbound": "proxy", "domain": ['"www.amurmuseum.ru",'],
+                                   "override_address": "2a0a:8d80:0:a000::30"})
+    assert rule["domain"] == ["www.amurmuseum.ru"]
+    assert xray.advanced_rule(rule, "singbox")["domain"] == ["domain:www.amurmuseum.ru"]
+    sb = singbox.sbox_rule(rule)
+    assert sb == {"domain_suffix": ["www.amurmuseum.ru"], "action": "route-options",
+                  "override_address": "2a0a:8d80:0:a000::30"}
+    # префикс domain: (как в Xray) — тоже суффикс домена, а не потерянное условие
+    prefixed = routing.normalize_rule({"outbound": "proxy", "domain": ["domain:example.com"],
+                                       "tls_fragment": True})
+    assert singbox.sbox_rule(prefixed)["domain_suffix"] == ["example.com"]
+    # несколько элементов JSON-массива в одной строке (строка, не список)
+    many = routing.normalize_rule({"domain": '["a.ru", "b.ru"]'})
+    assert many["domain"] == ["a.ru", "b.ru"]

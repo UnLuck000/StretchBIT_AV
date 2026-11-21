@@ -115,3 +115,70 @@ def test_missing_bases_are_due(tmp_path, monkeypatch):
     (tmp_path / "feeds" / "virusshare_00001.md5.bin").write_bytes(bytes(16))
     assert not updater.bases_missing() and not updater.needs_update(now - 60, now=now)
     assert updater.needs_update(0, now=now)
+
+
+def test_virusshare_last_is_bounded(monkeypatch):
+    """Поиск последнего списка VirusShare — не больше VIRUSSHARE_PROBES HEAD-запросов."""
+    calls = []
+
+    def exists(n, timeout=15):
+        calls.append(n)
+        return 0 < n <= 511
+
+    monkeypatch.setattr(updater, "_virusshare_exists", exists)
+    assert updater._virusshare_last(505) == 511
+    assert len(calls) <= updater.VIRUSSHARE_PROBES
+
+
+def test_virusshare_last_returns_none_not_walk_hundreds(monkeypatch):
+    """Всё 404 рядом с подсказкой — вернуть None за ~10 проб, а не перебирать вниз сотни."""
+    calls = []
+    monkeypatch.setattr(updater, "_virusshare_exists",
+                        lambda n, timeout=15: calls.append(n) or False)
+    assert updater._virusshare_last(505) is None
+    assert len(calls) <= updater.VIRUSSHARE_PROBES
+    assert max(calls) <= 505 and min(calls) >= 505 - updater.VIRUSSHARE_PROBES
+
+
+def test_virusshare_step_respects_budget(tmp_path, monkeypatch, capsys):
+    """Шаг VirusShare не бесконечен: общий бюджет обрывает докачку, состояние сохраняется."""
+    import json
+    monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
+    monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 511)
+    monkeypatch.setattr(updater, "VIRUSSHARE_BUDGET", 0)   # лимит исчерпан сразу
+    progress = []
+    assert updater.update_virusshare(progress=progress.append) is True
+    assert any("список 1 из 50" in p for p in progress)
+    assert "не успел" in capsys.readouterr().out
+    assert json.loads((tmp_path / "feeds" / "virusshare.json").read_text()) == {"last": 511}
+
+
+def test_virusshare_step_passes_file_timeout(tmp_path, monkeypatch):
+    """Каждый список качается с VIRUSSHARE_FILE_TIMEOUT, а не 300 с."""
+    monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
+    monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 511)
+    seen = {}
+
+    def download(url, timeout=120, data=None, headers=None, limit=updater.MAX_DOWNLOAD):
+        seen["timeout"] = timeout
+        return b"0123456789abcdef0123456789abcdef\n"
+
+    monkeypatch.setattr(updater, "_download", download)
+    assert updater.update_virusshare(files=2) is True
+    assert seen["timeout"] == updater.VIRUSSHARE_FILE_TIMEOUT
+    assert len(list((tmp_path / "feeds").glob("virusshare_*.md5.bin"))) == 2
+
+
+def test_read_limited_rejects_oversized():
+    class Resp:
+        def __init__(self, data, headers=None):
+            self._data, self.headers = data, headers or {}
+
+        def read(self, n):
+            return self._data[:n]
+
+    with pytest.raises(ValueError):
+        updater._read_limited(Resp(b"x" * 99, {"Content-Length": "99"}), 10)  # заявлено больше
+    with pytest.raises(ValueError):
+        updater._read_limited(Resp(b"x" * 99), 10)                            # не помещается
+    assert updater._read_limited(Resp(b"x" * 5), 10) == b"x" * 5

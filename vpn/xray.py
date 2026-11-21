@@ -250,7 +250,8 @@ DOMAIN_PREFIXES = ("domain", "full", "keyword", "regexp", "geosite", "dotless", 
 
 def domain_entry(entry: str) -> str:
     """Строка домена в виде Xray: с префиксом (domain:, full:, ...) как есть, иначе domain:."""
-    entry = entry.strip()
+    from vpn import routing
+    entry = routing.clean_domain(entry)
     low = entry.lower()
     if ":" in entry and low.split(":", 1)[0] in DOMAIN_PREFIXES:
         prefix, rest = entry.split(":", 1)

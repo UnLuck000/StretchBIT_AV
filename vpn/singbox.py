@@ -177,7 +177,9 @@ def _sb_domains(rule: dict) -> dict:
     result: dict[str, list[str]] = {}
     for entry in rule.get("domain") or []:
         low = entry.strip().lower()
-        if low.startswith("full:"):
+        if low.startswith("domain:"):           # префикс Xray: домен и все поддомены
+            result.setdefault("domain_suffix", []).append(entry[7:].strip().strip("."))
+        elif low.startswith("full:"):
             result.setdefault("domain", []).append(entry[5:].strip())
         elif low.startswith("keyword:"):
             result.setdefault("domain_keyword", []).append(entry[8:].strip())
@@ -351,6 +353,7 @@ def build_config(socks_port: int, xray_exe: str, ip_mode: str = "ipv4",
         extra.append({"network": "udp", "action": "reject"})
     elif block_quic:
         extra.append({"network": "udp", "port": 443, "action": "reject"})
+    advanced_rules = [r for r in (sbox_rule(a) for a in advanced or []) if r]
     return {
         "log": {"level": "warn", "timestamp": True},
         "dns": {
@@ -374,15 +377,18 @@ def build_config(socks_port: int, xray_exe: str, ip_mode: str = "ipv4",
             "rules": [
                 *([IPV6_EARLY_REJECT] if only_ipv4 else []),
                 {"action": "sniff"},
-                # параметры действия из правил «Дополнительно» (route-options/reject):
-                # non-final — трафик после них продолжает сопоставляться и уходит в Xray
-                *[r for r in (sbox_rule(a) for a in advanced or []) if r],
+                # блокировка из правил «Дополнительно» — до остальных правил
+                *[r for r in advanced_rules if r.get("action") == "reject"],
                 {"protocol": "dns", "action": "hijack-dns"},
                 {"process_path": [os.path.normpath(xray_exe)], "outbound": "direct"},
                 *([{"process_path": [os.path.normpath(a) for a in direct_apps],
                     "outbound": "direct"}] if direct_apps else []),
                 {"ip_is_private": True, "outbound": "direct"},
                 *extra,
+                # параметры действия (route-options) — после отказов IPv6/UDP: раньше они
+                # стояли до них, и подмена адреса на IPv6 в режиме «только IPv4» попадала
+                # под reject (соединение рвалось, 21.11.2026). non-final: трафик идёт в Xray
+                *[r for r in advanced_rules if r.get("action") != "reject"],
             ],
             "final": "proxy",
             "auto_detect_interface": True,

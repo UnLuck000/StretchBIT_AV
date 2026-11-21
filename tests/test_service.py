@@ -372,7 +372,7 @@ def test_service_updates_bases_once_a_day(core, monkeypatch):
     calls = []
     monkeypatch.setattr(updater, "can_update", lambda: True)
     monkeypatch.setattr(updater, "bases_missing", lambda: False)
-    def update_all(fraction=None):
+    def update_all(progress=None, fraction=None):
         for value in (0.0, 0.004, 0.3, 0.6, 1.0):
             fraction(value)
             calls.append(core.op_status(user(), {})["db_progress"])
@@ -393,7 +393,7 @@ def test_service_updates_bases_once_a_day(core, monkeypatch):
     from service.core import ServiceCore
     again = ServiceCore(core.folder, monitor_factory=FakeMonitor)        # время сохранено
     assert again.config["db_last_update"] == 10 * 86400.0
-    monkeypatch.setattr(updater, "update_all", lambda fraction=None: False)
+    monkeypatch.setattr(updater, "update_all", lambda progress=None, fraction=None: False)
     assert core.update_bases_if_due(now=12 * 86400.0) is False
     assert core.op_events(user(), {"since": 0})["events"][-1]["text"] == "fail"
 
@@ -411,7 +411,8 @@ def test_service_updates_missing_bases_and_logs_reasons(core, monkeypatch, caplo
     assert core.update_bases_if_due(now=10 * 86400.0 + 60) is None
     monkeypatch.setattr(updater, "bases_missing", lambda: True)
 
-    def failing(fraction=None):
+    def failing(progress=None, fraction=None):
+        progress("VirusShare: список 1 из 50")
         print("MalwareBazaar: ошибка URLError: CERTIFICATE_VERIFY_FAILED")
         return False
     monkeypatch.setattr(updater, "update_all", failing)
@@ -421,3 +422,4 @@ def test_service_updates_missing_bases_and_logs_reasons(core, monkeypatch, caplo
         assert core.update_bases_if_due(now=10 * 86400.0 + 120) is False
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "баз на диске нет" in text and "CERTIFICATE_VERIFY_FAILED" in text
+    assert "VirusShare: список 1 из 50" in text   # ход шага — сразу в журнал, не после

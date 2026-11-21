@@ -63,6 +63,11 @@ C2_KEEP_DAYS = 30           # адрес C2 из ThreatFox хранится ст
 VIRUSSHARE_URL = "https://virusshare.com/hashfiles/VirusShare_{n:05d}.md5"
 VIRUSSHARE_FILES = 50       # сколько последних списков VirusShare держать (~6,5 млн MD5)
 VIRUSSHARE_FIRST_GUESS = 505
+VIRUSSHARE_PROBE_TIMEOUT = 15   # с: один HEAD-запрос при поиске последнего списка
+VIRUSSHARE_PROBES = 10          # всего таких запросов за обновление (раньше — до 505)
+VIRUSSHARE_SPAN = 64            # дальше этого от подсказки номер не ищем
+VIRUSSHARE_FILE_TIMEOUT = 90    # с: один список MD5
+VIRUSSHARE_BUDGET = 15 * 60     # с: весь шаг; не успели — остальное в следующий раз
 RULE_SOURCES = {  # папка в community/ -> (архив, часть пути внутри архива)
     "signature-base": ("https://github.com/Neo23x0/signature-base/archive/refs/heads/master.zip",
                        "/yara/"),
@@ -96,12 +101,27 @@ MIRROR_MANIFEST_VERSION = 1
 
 
 # ---------- общее ----------
+MAX_DOWNLOAD = 512 * 2**20   # байт: больше из одного ответа не читаем (архивы правил, URLhaus)
+
+
+def _read_limited(resp, limit: int) -> bytes:
+    """Тело ответа целиком, но не больше limit байт. Без этого «бесконечный» ответ или
+    ошибочная страница вместо файла занимала память, пока хватает соединения (21.11.2026)."""
+    declared = resp.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise ValueError(f"ответ больше {limit // 2**20} МБ")
+    raw = resp.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError(f"ответ больше {limit // 2**20} МБ")
+    return raw
+
+
 def _download(url: str, timeout: int = 120, data: bytes | None = None,
-              headers: dict | None = None) -> bytes:
+              headers: dict | None = None, limit: int = MAX_DOWNLOAD) -> bytes:
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "StretchBIT-updater/1.0",
                                                           **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        return _read_limited(resp, limit)
 
 
 # ---------- зеркало на GitHub ----------
@@ -344,11 +364,11 @@ def _host(value: str) -> str | None:
     return value
 
 
-def _virusshare_exists(n: int) -> bool:
+def _virusshare_exists(n: int, timeout: int = VIRUSSHARE_PROBE_TIMEOUT) -> bool:
     req = urllib.request.Request(VIRUSSHARE_URL.format(n=n), method="HEAD",
                                  headers={"User-Agent": "StretchBIT-updater/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=30):
+        with urllib.request.urlopen(req, timeout=timeout):
             return True
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -356,19 +376,45 @@ def _virusshare_exists(n: int) -> bool:
         raise
 
 
-def _virusshare_last(hint: int) -> int:
-    """Номер последнего списка: идём вверх от известного, пока файлы есть."""
+def _virusshare_last(hint: int) -> int | None:
+    """Номер последнего списка: от подсказки вверх удвоением и двоичным поиском. Не больше
+    VIRUSSHARE_PROBES HEAD-запросов и VIRUSSHARE_SPAN в сторону: раньше 404 на подсказку
+    включал перебор вниз по одному — до 505 запросов, десятки минут (21.11.2026).
+    None — рядом с подсказкой не нашли ни одного списка."""
+    used = [0]
+
+    def exists(n: int) -> bool:
+        used[0] += 1
+        return _virusshare_exists(n)
+
+    def left() -> bool:
+        return used[0] < VIRUSSHARE_PROBES
+
     n = max(0, hint)
-    while not _virusshare_exists(n) and n > 0:  # подсказка из будущего (сбой состояния)
+    found = exists(n)
+    down = 0
+    while not found and n > 0 and down < VIRUSSHARE_SPAN and left():
         n -= 1
+        down += 1
+        found = exists(n)
+    if not found:
+        return None
     step = 1
-    while _virusshare_exists(n + step):
+    hi = None
+    while left() and step <= VIRUSSHARE_SPAN:
+        if not exists(n + step):
+            hi = n + step
+            break
         n += step
         step *= 2
-    while step > 1:  # уточняем двоичным поиском
-        step //= 2
-        if _virusshare_exists(n + step):
-            n += step
+    if hi is None:
+        hi = n + step
+    while hi - n > 1 and left():
+        mid = (n + hi) // 2
+        if exists(mid):
+            n = mid
+        else:
+            hi = mid
     return n
 
 
@@ -387,24 +433,36 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
         state = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         state = {}
+    hint = int(state.get("last", VIRUSSHARE_FIRST_GUESS))
     try:
-        last = _virusshare_last(int(state.get("last", VIRUSSHARE_FIRST_GUESS)))
+        last = _virusshare_last(hint)
     except Exception as e:
         print(f"VirusShare: сайт недоступен: {_error(e)}")
         return False
+    if last is None:
+        print(f"VirusShare: последний список не найден около {hint} — "
+              "сайт сменил нумерацию или не отвечает")
+        return False
+    if progress:
+        progress(f"VirusShare: последний список {last}")
     wanted = list(range(last, max(-1, last - files), -1))
     FEEDS_DIR.mkdir(parents=True, exist_ok=True)
     have = {int(m.group(1)) for p in FEEDS_DIR.glob("virusshare_*.md5.bin")
             if (m := re.match(r"virusshare_(\d+)\.md5\.bin$", p.name))}
     missing = [n for n in wanted if n not in have]
+    deadline = time.monotonic() + VIRUSSHARE_BUDGET
     loaded, failed = 0, 0
     for i, n in enumerate(missing, 1):
         if progress:
             progress(f"VirusShare: список {i} из {len(missing)}")
         if part:
             part((i - 1) / len(missing))
+        if time.monotonic() >= deadline:
+            print(f"VirusShare: не успел за {VIRUSSHARE_BUDGET // 60} мин — "
+                  f"осталось {len(missing) - i + 1}, докачаю в следующий раз")
+            break
         try:
-            data = md5_bin(_download(VIRUSSHARE_URL.format(n=n), timeout=300))
+            data = md5_bin(_download(VIRUSSHARE_URL.format(n=n), timeout=VIRUSSHARE_FILE_TIMEOUT))
         except Exception as e:
             failed += 1
             print(f"VirusShare {n:05d}: {_error(e)}")
@@ -440,7 +498,7 @@ def _download_changed(url: str, etag: str, timeout: int = 300) -> tuple[bytes | 
             new = resp.headers.get("ETag") or ""
             if etag and new == etag:
                 return None, etag
-            return resp.read(), new
+            return _read_limited(resp, MAX_DOWNLOAD), new
     except urllib.error.HTTPError as e:
         if e.code == 304:
             return None, etag
