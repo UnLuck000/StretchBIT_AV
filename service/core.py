@@ -224,15 +224,16 @@ class ServiceCore:
             self.start_pipe()
 
     def _recover_vpn(self) -> None:
-        """Служба перезапущена после сбоя с подключённым VPN: kill switch и подмена DNS
-        (их копии — в настройках службы) возвращаются, иначе интернет остался бы перекрыт."""
-        from vpn import dnsguard, killswitch
-        for name, recover in (("kill switch", killswitch.recover), ("DNS", dnsguard.recover)):
-            try:
-                if recover():
-                    self.log.warning("VPN: после сбоя службы возвращено: %s", name)
-            except OSError:
-                self.log.exception("VPN: не удалось вернуть %s после сбоя", name)
+        """Служба стартует после сбоя/выключения питания с включённым VPN: снять то, что
+        перекрыло бы интернет — ядра без программы, kill switch, подмена DNS, системный
+        прокси (selfguard.recover_network)."""
+        from selfguard import recover_network
+        try:
+            report = recover_network()
+        except Exception as e:  # noqa: BLE001 — отдельные шаги уже отчитались внутри
+            report = [f"ошибка {e}"]
+        for line in report:
+            self.log.warning("VPN: после сбоя службы: %s", line)
 
     DB_CHECK_INTERVAL = 15 * 60  # с: как часто заглядываем в update_due (сам апдейт — по таймеру)
     DB_RETRY = 120               # с: обновление не удалось (сеть ещё не поднялась) — повтор

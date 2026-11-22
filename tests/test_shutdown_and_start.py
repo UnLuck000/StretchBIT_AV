@@ -107,3 +107,15 @@ def test_manual_start_asks_for_rights_even_with_service():
     core = (Path(__file__).resolve().parent.parent / "service" / "core.py").read_text(
         encoding="utf-8")
     assert '"--alarm"' in core
+
+
+def test_service_recover_vpn_uses_selfguard(svc, monkeypatch):
+    """Возврат сети после сбоя VPN — через selfguard.recover_network (все 4 шага)."""
+    import selfguard
+    monkeypatch.setattr(selfguard, "recover_network",
+                        lambda: ["kill switch: возвращено", "прокси: возвращено"])
+    seen = []
+    monkeypatch.setattr(svc.log, "warning", lambda msg, *a: seen.append(msg % a))
+    svc._recover_vpn()
+    assert seen == ["VPN: после сбоя службы: kill switch: возвращено",
+                    "VPN: после сбоя службы: прокси: возвращено"]

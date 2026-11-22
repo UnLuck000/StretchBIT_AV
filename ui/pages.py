@@ -618,7 +618,7 @@ class SettingsPage(_UiPage):
             return
         cfg.reset()
         try:
-            cfg.set_autostart(cfg.get("startup/autostart"))  # по умолчанию — выключен
+            cfg.set_autostart(cfg.get("startup/autostart"))  # по умолчанию — включён
         except OSError:
             pass
         self.load_values()

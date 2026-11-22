@@ -169,6 +169,18 @@ def test_virusshare_step_passes_file_timeout(tmp_path, monkeypatch):
     assert len(list((tmp_path / "feeds").glob("virusshare_*.md5.bin"))) == 2
 
 
+def test_virusshare_nothing_new_says_all_present(tmp_path, monkeypatch, capsys):
+    """Списки уже на диске — «все списки на месте», а не пугающее «скачано 0»."""
+    monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
+    (tmp_path / "feeds").mkdir()
+    (tmp_path / "feeds" / "virusshare.json").write_text('{"last": 505}')
+    for n in (504, 505):
+        (tmp_path / "feeds" / f"virusshare_{n:05d}.md5.bin").write_bytes(bytes(16))
+    monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 505)
+    assert updater.update_virusshare(files=2) is True
+    assert "все списки на месте" in capsys.readouterr().out
+
+
 def test_read_limited_rejects_oversized():
     class Resp:
         def __init__(self, data, headers=None):

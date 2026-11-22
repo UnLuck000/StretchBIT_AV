@@ -35,10 +35,31 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Прежние файлы (остаются, если источник сбоит)
+        run: |
+          mkdir -p prev
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/feeds/manifest.json" -o prev/manifest.json || true
+          python - <<'PY'
+          import json, os, urllib.request
+          try:
+              man = json.load(open("prev/manifest.json", encoding="utf-8"))
+          except Exception:
+              raise SystemExit(0)
+          base = f"https://raw.githubusercontent.com/{os.environ['GITHUB_REPOSITORY']}/refs/heads/feeds/"
+          for info in man.get("files", {}).values():
+              name = info.get("name")
+              if not name:
+                  continue
+              try:
+                  urllib.request.urlretrieve(base + name, os.path.join("prev", name))
+              except Exception:
+                  pass
+          PY
+
       - name: Скачать источники
         env:
           ABUSECH_AUTH_KEY: ${{ secrets.ABUSECH_AUTH_KEY }}
-        run: python tools/feeds_mirror.py out
+        run: python tools/feeds_mirror.py out prev
 
       # до 14.11.2026 (вечер) зеркало было выпуском «feeds»: выпуск и метка с тем же именем, что у
       # ветки, не нужны (программа берёт refs/heads/feeds)

@@ -477,8 +477,11 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
             pass  # файл открыт сканером: удалится при следующем обновлении
     _write_atomic(state_file, json.dumps({"last": last}))
     total = sum(p.stat().st_size // 16 for p in FEEDS_DIR.glob("virusshare_*.md5.bin"))
-    print(f"VirusShare: списков скачано {loaded}" + (f", с ошибкой {failed}" if failed else "")
-          + f", MD5 всего {total}")
+    if not missing:
+        print(f"VirusShare: все списки на месте, MD5 всего {total}")
+    else:
+        print(f"VirusShare: списков скачано {loaded}"
+              + (f", с ошибкой {failed}" if failed else "") + f", MD5 всего {total}")
     return failed < len(missing) or not missing
 
 

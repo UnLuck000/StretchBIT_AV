@@ -23,7 +23,7 @@ LEGACY_EXPLORER_KEY = r"Software\Classes\*\shell\StudyAV"  # пункт меню
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
-    "startup/autostart": False,     # задание планировщика при входе в Windows (с правами)
+    "startup/autostart": True,      # задание планировщика при входе в Windows (с правами)
     "advanced/warned": False,       # предупреждение при первом открытии доп. настроек уже было
     "vpn/autostart": False,         # подключать VPN вместе с программой (профиль автоподключения)
     "vpn/xray_path": "",            # xray.exe (пусто — искать самостоятельно, vpn/xray.py)

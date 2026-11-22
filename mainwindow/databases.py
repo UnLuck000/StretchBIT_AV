@@ -208,7 +208,10 @@ class DatabasesMixin:
                                         fraction=self.update_fraction.emit)
         except Exception as e:
             buffer.write(f"Ошибка: {e}\n")
-        self.update_finished.emit(buffer.getvalue(), ok, silent)
+        # update_all возвращает True / "partial" / False. Окну "partial" — успех (часть
+        # источников не ответила, но базы обновились): без bool() строка попала бы в
+        # bool-сигнал как False, и частичное обновление показывалось бы «не удалось»
+        self.update_finished.emit(buffer.getvalue(), bool(ok), silent)
 
     def _on_update_progress(self, text: str):
         if not self._update_silent:

@@ -67,6 +67,19 @@ def test_build_without_key_and_bad_answer(tmp_path):
     assert "ключа" in manifest["errors"]["threatfox"]
 
 
+def test_build_keeps_previous_file_when_source_fails(tmp_path):
+    """Источник сбоит, но есть прежний файл — он остаётся (устаревший лучше, чем ничего)."""
+    out = tmp_path / "out"
+    first = feeds_mirror.build(out, KEY, fake_sources())
+    out2 = tmp_path / "out2"
+    manifest = feeds_mirror.build(out2, KEY, fake_sources(fail=("threatfox",)), previous=out)
+    assert "threatfox" in manifest["files"]                  # прежний файл сохранён
+    assert "взят прежний" in manifest["errors"]["threatfox"]  # но помечен как сбой
+    assert manifest["files"]["threatfox"]["name"] == first["files"]["threatfox"]["name"]
+    packed = (out2 / manifest["files"]["threatfox"]["name"]).read_bytes()
+    assert hashlib.sha256(packed).hexdigest() == manifest["files"]["threatfox"]["sha256"]
+
+
 @pytest.fixture
 def mirror(tmp_path, monkeypatch):
     """Зеркало на диске + updater, который вместо сети читает его; прямые источники —

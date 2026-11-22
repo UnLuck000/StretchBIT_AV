@@ -78,13 +78,22 @@ SOURCES = {
 }
 
 
-def build(out: Path, key: str, sources: dict | None = None, now: float | None = None) -> dict:
-    """Скачать источники в папку out, вернуть manifest. Сбой одного источника — в errors
-    (только тип ошибки: в адресе MalwareBazaar и URLhaus ключ)."""
+def build(out: Path, key: str, sources: dict | None = None, now: float | None = None,
+          previous: Path | None = None) -> dict:
+    """Скачать источники в папку out, вернуть manifest. Сбой одного источника - в errors
+    (только тип ошибки: в адресе MalwareBazaar и URLhaus ключ). Если источник не скачался, а
+    в папке previous есть его прежний файл - он остаётся (устаревший лучше, чем ничего)."""
     sources = SOURCES if sources is None else sources
     now = time.time() if now is None else now
     stamp = time.strftime("%Y%m%d%H%M", time.gmtime(now))
     out.mkdir(parents=True, exist_ok=True)
+    prev_files = {}
+    if previous is not None:
+        try:
+            prev_manifest = json.loads((previous / "manifest.json").read_text(encoding="utf-8"))
+            prev_files = prev_manifest.get("files", {}) if isinstance(prev_manifest, dict) else {}
+        except (OSError, ValueError):
+            prev_files = {}
     manifest = {"version": MANIFEST_VERSION, "generated": int(now), "files": {}, "errors": {}}
     for kind, (ext, needs_key, fetch, check) in sources.items():
         if needs_key and not key:
@@ -93,8 +102,16 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
         try:
             raw = fetch(key)
             check(raw)
-        except Exception as e:  # noqa: BLE001 — любой сбой источника: остальные идут дальше
-            manifest["errors"][kind] = type(e).__name__
+        except Exception as e:  # noqa: BLE001 — любой сбой источника: пробуем прежний файл
+            prev = prev_files.get(kind) or {}
+            prev_name = str(prev.get("name", ""))
+            prev_path = previous / prev_name if previous is not None and prev_name else None
+            if prev_path is not None and prev_path.exists():
+                (out / prev_name).write_bytes(prev_path.read_bytes())
+                manifest["files"][kind] = dict(prev)
+                manifest["errors"][kind] = f"{type(e).__name__} (взят прежний)"
+            else:
+                manifest["errors"][kind] = type(e).__name__
             continue
         if key and key.encode() in raw:  # на всякий случай: ключ не выкладываем ни в каком виде
             manifest["errors"][kind] = "в ответе ключ"
@@ -116,7 +133,8 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     key = os.environ.get("ABUSECH_AUTH_KEY", "").strip()
-    manifest = build(Path(argv[1]), key)
+    previous = Path(argv[2]) if len(argv) > 2 else None
+    manifest = build(Path(argv[1]), key, previous=previous)
     for kind, info in manifest["files"].items():
         print(f"{kind}: {info['name']}, {info['size']} байт")
     for kind, error in manifest["errors"].items():
