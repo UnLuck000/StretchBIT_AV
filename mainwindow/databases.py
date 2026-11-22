@@ -5,7 +5,7 @@ import time
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
 
 from diag import features
 from networkmonitor.ioc import load_ip_blocklist
@@ -62,20 +62,38 @@ class DatabasesMixin:
     def check_updates(self):
         QDesktopServices.openUrl(QUrl(appinfo.RELEASES_URL))
 
+    def update_databases_manual(self):
+        """Кнопка «Обновить» на главной: обновить базы сейчас. Со службой просим её (окно без
+        прав не пишет в папку баз), без службы — качаем сами."""
+        if self.service is not None:
+            from service.client import ServiceError
+            try:
+                self.service.call("bases.update")
+                self.add_event("Запрошено обновление баз (служба)")
+            except ServiceError as e:
+                self.statusBar().showMessage(f"Служба не начала обновление: {e}", 12000)
+            return
+        if not updater.can_update():
+            self.add_event("Базы не обновлены: нет прав администратора "
+                           "(папка баз закрыта от записи)", "warning")
+            self.statusBar().showMessage("Обновление баз требует прав администратора", 8000)
+            return
+        self.update_databases(silent=False)
+
     def start_auto_update(self):
         """Автообновление баз: при запуске и затем каждые полчаса проверяется, прошли ли
-        сутки с последнего обновления (см. updater.update_due). Там же раз в сутки —
-        новый выпуск программы (updatecheck.py), только сообщение."""
+        12 часов с последнего обновления (см. updater.update_due). Там же каждые 5 минут —
+        новый выпуск программы (updatecheck.py)."""
         self.auto_update_timer.start()
         QTimer.singleShot(5000, self.auto_update_check)  # окно успевает открыться
         QTimer.singleShot(20000, self.check_release)
         self._release_timer = QTimer(self)
         self._release_timer.timeout.connect(self.check_release)
-        self._release_timer.start(6 * 3600 * 1000)
+        self._release_timer.start(5 * 60 * 1000)
 
     # ---------- обновление программы ----------
     def check_release(self, manual: bool = False):
-        if not manual and time.time() - cfg.get("update/last_check") < 24 * 3600:
+        if not manual and time.time() - cfg.get("update/last_check") < 5 * 60:
             return
         if manual:
             self.about_page.update_btn.setEnabled(False)
@@ -108,46 +126,48 @@ class DatabasesMixin:
         if not manual:
             if cfg.get("update/skipped") == release.version:
                 return
-            self.add_event(f"Доступна версия {release.version} — «О программе» → «Проверить "
-                           "обновления»", "info")
+            if cfg.get("update/shown") == release.version:
+                return  # эту версию уже показывали — не докучать каждые 5 минут
+            cfg.set_("update/shown", release.version)
+        self.show_update_window(release, manual)
+
+    def show_update_window(self, release, manual: bool = False):
+        """Обычное окно поверх окон StretchBIT: скачать установщик новой версии в «Загрузки».
+        При автопроверке — ещё и уведомление Windows."""
+        from ui.update_window import UpdateWindow
+        win = getattr(self, "update_window", None)
+        if win is not None and win.isVisible():
+            win.raise_()
+            win.activateWindow()
             return
-        box = QMessageBox(self)
-        box.setWindowTitle("Обновление")
-        box.setText(f"Доступна версия {release.version} (сейчас {appinfo.VERSION}).")
-        box.setInformativeText((release.notes[:1500] + "\n\n" if release.notes else "") +
-                               "Установщик скачается, проверится по SHA256SUMS выпуска и "
-                               "подписи и запустится — он сам попросит закрыть программу.")
-        install = box.addButton("Скачать и установить", QMessageBox.ButtonRole.AcceptRole)
-        page = box.addButton("Открыть страницу выпуска", QMessageBox.ButtonRole.ActionRole)
-        skip = box.addButton("Пропустить эту версию", QMessageBox.ButtonRole.DestructiveRole)
-        box.addButton("Позже", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        if box.clickedButton() is page:
-            QDesktopServices.openUrl(QUrl(release.page))
-        elif box.clickedButton() is skip:
-            cfg.set_("update/skipped", release.version)
-        elif box.clickedButton() is install:
-            self.about_page.update_btn.setEnabled(False)
-            self.about_page.update_btn.setText("Скачиваю...")
+        win = UpdateWindow(release, self)
+        self.update_window = win
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        if not manual:
+            self._notify_release(release)
 
-            def job():
-                try:
-                    self.release_downloaded.emit(updatecheck.download(release), "")
-                except Exception as e:  # noqa: BLE001 — показать причину
-                    self.release_downloaded.emit(None, str(e))
+    def _notify_release(self, release):
+        """Уведомление Windows о новой версии (без него — через значок в трее)."""
+        shown = self.notifier.show(
+            "Доступно обновление",
+            f"Появилась новая версия StretchBIT {release.version}.",
+            [("Открыть", "open"), ("Позже", "later")], self._on_release_toast)
+        if not shown and self.tray is not None:
+            self.tray.showMessage(
+                "Доступно обновление",
+                f"Появилась новая версия StretchBIT {release.version}.",
+                QSystemTrayIcon.MessageIcon.Information, 12000)
 
-            threading.Thread(target=job, daemon=True, name="release-download").start()
-
-    def _on_release_downloaded(self, path, error: str):
-        import updatecheck
-        self.about_page.update_btn.setEnabled(True)
-        self.about_page.update_btn.setText("Проверить обновления")
-        if path is None:
-            activity.record("program", f"Обновление не установлено: {error}")
-            QMessageBox.warning(self, "Обновление", f"Установщик не запущен: {error}")
+    def _on_release_toast(self, argument):
+        if argument not in ("open", ""):
             return
-        activity.record("program", f"Запущен установщик обновления: {path.name}")
-        updatecheck.run_installer(path)
+        win = getattr(self, "update_window", None)
+        if win is not None:
+            win.show()
+            win.raise_()
+            win.activateWindow()
 
     def auto_update_check(self):
         if getattr(self, "service", None) is not None:

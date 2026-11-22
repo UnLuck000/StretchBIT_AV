@@ -157,6 +157,7 @@ class ServiceCore:
         self._run = 0
         self._status = "Защита файлов выключена."
         self._db_progress: float | None = None   # идёт обновление баз — доля готовности
+        self._db_lock = threading.Lock()        # одно обновление баз за раз (фон и кнопка)
         self.server = None
         from diag.log import get
         self.log = get("service")
@@ -188,6 +189,7 @@ class ServiceCore:
                 "folders": folders if isinstance(folders, dict) else {},
                 "lock_protection": bool(data.get("lock_protection", False)),
                 "db_last_update": float(data.get("db_last_update", 0.0) or 0.0),
+                "db_partial": float(data.get("db_partial", 0.0) or 0.0),
                 "guards": {k: bool(guards.get(k, v)) for k, v in DEFAULTS.items()}}
 
     def _save_config(self) -> None:
@@ -253,22 +255,36 @@ class ServiceCore:
             retry = result is False and failed <= self.DB_RETRIES
             self._db_stop.wait(self.DB_RETRY if retry else self.DB_CHECK_INTERVAL)
 
-    def update_bases_if_due(self, now: float | None = None) -> bool | None:
+    def update_bases_if_due(self, now: float | None = None, force: bool = False) -> bool | None:
         """Одна проверка: прошли UPDATE_INTERVAL (12 ч) — обновить базы; если часть
-        источников не ответила — докачать через RETRY_INTERVAL (4 ч). None — не пора или
-        нет прав на папку баз; True/False — удалось ли (событие «db» уходит окнам)."""
-        import contextlib
-        import io
-
+        источников не ответила — докачать через RETRY_INTERVAL (4 ч). force — по кнопке
+        «Обновить», не дожидаясь расписания. None — не пора, нет прав или уже идёт другое
+        обновление; True/False — удалось ли (событие «db» уходит окнам)."""
         import updater
         now = time.time() if now is None else now
         if not updater.can_update():
             return None
+        if not force and not self._update_due(now):
+            return None
+        if not self._db_lock.acquire(blocking=False):  # фон или кнопка уже обновляют
+            return None
+        try:
+            return self._run_update(now)
+        finally:
+            self._db_lock.release()
+
+    def _update_due(self, now: float) -> bool:
+        """Пора ли: прошли UPDATE_INTERVAL или пришло время докачать недокачанное."""
+        import updater
         due = updater.needs_update(self.config.get("db_last_update", 0.0), now)
         partial = self.config.get("db_partial", 0.0)
-        retry = partial > 0 and now - partial >= updater.RETRY_INTERVAL
-        if not due and not retry:
-            return None
+        return due or (partial > 0 and now - partial >= updater.RETRY_INTERVAL)
+
+    def _run_update(self, now: float) -> bool:
+        import contextlib
+        import io
+
+        import updater
         self.log.info("Базы: начинаю автообновление%s",
                       " (баз на диске нет)" if updater.bases_missing() else "")
         output = io.StringIO()
@@ -549,6 +565,13 @@ class ServiceCore:
         with self._lock:
             if self._monitor is not None:
                 self._monitor.reload_bases()
+        return True
+
+    def op_bases_update(self, client, args):
+        """Кнопка «Обновить» в окне: обновить базы сейчас (в фоне, не блокируя канал).
+        Ход и итог уходят окнам обычными событиями «db» / «db_progress»."""
+        threading.Thread(target=self.update_bases_if_due, kwargs={"force": True},
+                         daemon=True, name="svc-dbupdate-manual").start()
         return True
 
     # --- карантин: файлы пользователя — только через переданные дескрипторы ---

@@ -25,6 +25,7 @@ OPS = {
     "events": READ,
     "protection.set": CONTROL,      # выключение и удаление папок — WEAKEN (core.weakens)
     "bases.reload": CONTROL,
+    "bases.update": CONTROL,
     "quarantine.list": READ,
     "quarantine.add": CONTROL,
     "quarantine.delete": CONTROL,

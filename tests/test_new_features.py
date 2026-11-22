@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 import struct
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -193,3 +195,9 @@ def test_update_check_helpers(tmp_path, monkeypatch):
         updatecheck.verify(installer, digest, current_exe=str(me))
     signed[str(installer)] = Sig("valid", "Автор")
     updatecheck.verify(installer, digest, current_exe=str(me))
+
+
+def test_update_downloads_dir_fallback(monkeypatch):
+    import updatecheck
+    monkeypatch.setattr(sys, "platform", "linux")   # нет API Windows — берём ~/Downloads
+    assert updatecheck.downloads_dir() == Path.home() / "Downloads"

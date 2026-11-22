@@ -71,6 +71,7 @@ class DashboardPage(_UiPage):
     quick_scan = Signal()
     toggle_protection = Signal()
     check_updates = Signal()
+    update_databases = Signal()
     open_processes = Signal()
     open_scan = Signal()
     open_journal = Signal()
@@ -130,6 +131,12 @@ class DashboardPage(_UiPage):
         self.db_bar.hide()
         card = child(ui, QFrame, "cardDatabases")
         card.layout().addWidget(self.db_bar)
+        # ручное обновление баз: кнопка прямо в карточке «Базы» на главной
+        self.btn_update = QPushButton("Обновить")
+        self.btn_update.setProperty("action", True)
+        self.btn_update.setToolTip("Скачать свежие хэши, правила YARA и адреса C2")
+        self.btn_update.clicked.connect(lambda checked=False: self.update_databases.emit())
+        card.layout().addWidget(self.btn_update)
         self._db_dots = 0
         self._db_timer = QTimer(self)
         self._db_timer.setInterval(450)
@@ -187,6 +194,7 @@ class DashboardPage(_UiPage):
         stale = not updated or time.time() - updated > 3 * 86400
         updating = bool(info.get("db_updating"))
         self._show_db_updating(updating, info.get("db_progress") or 0.0)
+        self.btn_update.setEnabled(not updating)
         if not updating:
             self.labels["databases"].setText(
                 time.strftime("обновлены %d.%m.%Y %H:%M", time.localtime(updated)) if updated

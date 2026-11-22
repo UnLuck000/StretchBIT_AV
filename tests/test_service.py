@@ -445,3 +445,32 @@ def test_service_retries_partial_update_in_four_hours(core, monkeypatch):
     assert core.update_bases_if_due(now=t0 + updater.RETRY_INTERVAL + 60) is True
     assert len(calls) == 2
     assert core.config["db_partial"] == t0 + updater.RETRY_INTERVAL + 60
+
+
+def test_service_manual_update_ignores_schedule(core, monkeypatch):
+    """Кнопка «Обновить» (bases.update → force): обновить сейчас, не дожидаясь 12 часов."""
+    import updater
+    monkeypatch.setattr(updater, "can_update", lambda: True)
+    monkeypatch.setattr(updater, "bases_missing", lambda: False)
+    monkeypatch.setattr(updater, "update_all", lambda progress=None, fraction=None: True)
+    core.config["db_last_update"] = 10 * updater.UPDATE_INTERVAL
+    assert core.update_bases_if_due(now=10 * updater.UPDATE_INTERVAL + 60) is None
+    assert core.update_bases_if_due(now=10 * updater.UPDATE_INTERVAL + 60, force=True) is True
+    assert core.config["db_last_update"] == 10 * updater.UPDATE_INTERVAL + 60
+    assert core.config["db_partial"] == 0.0
+
+
+def test_op_bases_update_runs_forced_in_background(core, monkeypatch):
+    """bases.update отвечает сразу и запускает обновление с force=True в фоне."""
+    done = threading.Event()
+    seen = {}
+
+    def fake(now=None, force=False):
+        seen["force"] = force
+        done.set()
+        return True
+
+    monkeypatch.setattr(core, "update_bases_if_due", fake)
+    assert core.op_bases_update(user(), {}) is True
+    assert done.wait(5)
+    assert seen["force"] is True

@@ -2,7 +2,7 @@
 
 latest() — версия и файлы последнего выпуска (api.github.com, без прокси из переменных
 окружения). download() скачивает установщик своей версии (StretchBIT[-test]-<версия>-
-setup.exe) и проверяет:
+setup.exe) в папку «Загрузки» и проверяет:
   * SHA-256 — по файлу SHA256SUMS того же выпуска (его пишет build_release.py);
   * подпись Authenticode — если текущая программа подписана, установщик должен быть подписан
     действительной подписью того же издателя; если не подписана — подпись установщика, если
@@ -21,11 +21,39 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import appinfo
-import datadirs
 
 API = "https://api.github.com/repos/{repo}/releases/latest"
 MAX_INSTALLER = 512 * 1024 * 1024
-DOWNLOAD_DIR = datadirs.CACHE / "update"
+DOWNLOADS_FOLDER = "{374DE290-123F-4565-9164-39C4925E467B}"  # FOLDERID_Downloads
+
+
+def downloads_dir() -> Path:
+    """Папка «Загрузки» (Windows может перенести её, например в OneDrive)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            import uuid
+            raw = (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID(DOWNLOADS_FOLDER).bytes_le)
+            out = ctypes.c_wchar_p()
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(raw), 0, None,
+                                                          ctypes.byref(out)) == 0:
+                path = Path(out.value)
+                ctypes.windll.ole32.CoTaskMemFree(out)
+                if path:
+                    return path
+        except Exception:  # noqa: BLE001 — нет API/прав: берём папку по умолчанию
+            from diag.log import swallowed
+            swallowed("обновление: папка «Загрузки»")
+    return Path.home() / "Downloads"
+
+
+def _mark_downloaded(path: Path, url: str) -> None:
+    """Метка «из интернета» (Mark of the Web): Windows предупредит при запуске."""
+    try:
+        with open(f"{path}:Zone.Identifier", "w", encoding="utf-8") as f:
+            f.write(f"[ZoneTransfer]\r\nZoneId=3\r\nHostUrl={url}\r\n")
+    except OSError:
+        pass
 
 
 @dataclass
@@ -120,8 +148,9 @@ def download(release: Release, progress=None) -> Path:
         sums = parse_sums(response.read(64 * 1024).decode("utf-8", "replace"))
     if name not in sums:
         raise ValueError(f"в SHA256SUMS нет строки для {name}")
-    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    target = DOWNLOAD_DIR / name
+    folder = downloads_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / name
     tmp = target.with_suffix(".part")
     total = 0
     with _open(release.assets[name], 60) as response, open(tmp, "wb") as out:
@@ -139,6 +168,7 @@ def download(release: Release, progress=None) -> Path:
         tmp.unlink(missing_ok=True)
         raise
     tmp.replace(target)
+    _mark_downloaded(target, release.assets[name])
     return target
 
 

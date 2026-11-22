@@ -144,7 +144,6 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
     memwatch_event = Signal(str, object)    # память процессов: вид, сведения (scanner/memwatch)
     service_status_ready = Signal(object)    # ответ службы на status (dict) или ошибка (str)
     release_found = Signal(object, str, bool)  # updatecheck.Release | None, ошибка, вручную
-    release_downloaded = Signal(object, str)   # путь установщика | None, ошибка
     systool_failed = Signal(object)         # diag.systool.Failure: системная программа не сработала
     service_event = Signal(object)          # событие службы Windows (service/client.EventPump)
 
@@ -228,7 +227,6 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         self.about_page = AboutPage()
         self.about_page.update_btn.clicked.connect(lambda: self.check_release(manual=True))
         self.release_found.connect(self._on_release_found)
-        self.release_downloaded.connect(self._on_release_downloaded)
 
         # «Журнал»: найденное (журнал защиты, с карантином), действия программы и исключения.
         # Белый список вкладкой не показывается: он пополняется восстановлением из карантина,
@@ -291,6 +289,7 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         self.dashboard.quick_scan.connect(self.quick_scan)
         self.dashboard.toggle_protection.connect(self.toggle_protection)
         self.dashboard.check_updates.connect(self.check_updates)
+        self.dashboard.update_databases.connect(self.update_databases_manual)
         self.dashboard.open_processes.connect(self.open_process_manager)
         self.dashboard.open_scan.connect(lambda: self.shell.show_page(SCAN_PAGE))
         self.dashboard.open_journal.connect(lambda: self.show_log("Журнал защиты"))

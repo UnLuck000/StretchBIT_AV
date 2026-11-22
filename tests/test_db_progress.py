@@ -67,6 +67,7 @@ def test_dashboard_card(qapp):
     page.refresh(info)
     label = page.labels["databases"]
     assert not page.db_bar.isHidden() and page.db_bar.value() == 400
+    assert not page.btn_update.isEnabled()          # во время обновления кнопка неактивна
     first = label.text()
     page._tick_db_dots()
     page._tick_db_dots()
@@ -77,3 +78,4 @@ def test_dashboard_card(qapp):
     page.refresh(dict(info, db_updating=False, db_updated=1_800_000_000))
     assert page.db_bar.isHidden() and not page._db_timer.isActive()
     assert label.text().startswith("обновлены")
+    assert page.btn_update.isEnabled()
