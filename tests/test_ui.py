@@ -31,7 +31,7 @@ def test_auto_update_setting_under_password(app):
     from ui import settings as cfg
     page = SettingsPage()
     assert page.chk_auto_update is not None
-    assert cfg.DEFAULTS["update/auto_install"] is False
+    assert cfg.DEFAULTS["update/auto_install"] is True   # автообновление включено по умолчанию
     assert not page.chk_auto_update.isVisible()  # родитель groupStartup скрыт до пароля
 
 

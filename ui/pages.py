@@ -674,11 +674,6 @@ class AboutPage(_UiPage):
         repo = child(ui, QPushButton, "btnRepo")
         repo.clicked.connect(
             lambda checked=False: QDesktopServices.openUrl(QUrl(appinfo.REPO_URL)))
-        # обновление программы (updatecheck.py): кнопка рядом со ссылкой на репозиторий
-        self.update_btn = QPushButton("Проверить обновления")
-        self.update_btn.setToolTip("Последний выпуск на GitHub: установщик проверяется по "
-                                   "SHA256SUMS и подписи, запускается только с вашего согласия")
-        repo.parentWidget().layout().addWidget(self.update_btn)
         self._admin_groups: list[QWidget] = []
 
     def add_admin_group(self, group: QWidget) -> None:

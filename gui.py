@@ -143,7 +143,7 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
     pslog_event = Signal(object)            # журнал PowerShell 4104: опасный блок скрипта
     memwatch_event = Signal(str, object)    # память процессов: вид, сведения (scanner/memwatch)
     service_status_ready = Signal(object)    # ответ службы на status (dict) или ошибка (str)
-    release_found = Signal(object, str, bool)  # updatecheck.Release | None, ошибка, вручную
+    release_found = Signal(object, str)  # updatecheck.Release | None, ошибка
     systool_failed = Signal(object)         # diag.systool.Failure: системная программа не сработала
     service_event = Signal(object)          # событие службы Windows (service/client.EventPump)
 
@@ -225,7 +225,6 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         self.exclusions_page = ExclusionsPage(show_title=False)
         self.settings_page = SettingsPage()
         self.about_page = AboutPage()
-        self.about_page.update_btn.clicked.connect(lambda: self.check_release(manual=True))
         self.release_found.connect(self._on_release_found)
 
         # «Журнал»: найденное (журнал защиты, с карантином), действия программы и исключения.

@@ -92,53 +92,39 @@ class DatabasesMixin:
         self._release_timer.start(5 * 60 * 1000)
 
     # ---------- обновление программы ----------
-    def check_release(self, manual: bool = False):
-        if not manual and time.time() - cfg.get("update/last_check") < 5 * 60:
+    def check_release(self):
+        if time.time() - cfg.get("update/last_check") < 5 * 60:
             return
-        if manual:
-            self.about_page.update_btn.setEnabled(False)
-            self.about_page.update_btn.setText("Проверяю...")
 
         def job():
             import updatecheck
             try:
                 release = updatecheck.latest()
                 cfg.set_("update/last_check", time.time())
-                self.release_found.emit(release, "", manual)
+                self.release_found.emit(release, "")
             except Exception as e:  # noqa: BLE001 — нет сети, нет выпусков, лимит GitHub
-                self.release_found.emit(None, str(e), manual)
+                self.release_found.emit(None, str(e))
 
         threading.Thread(target=job, daemon=True, name="release-check").start()
 
-    def _on_release_found(self, release, error: str, manual: bool):
+    def _on_release_found(self, release, error: str):
         import updatecheck
-        self.about_page.update_btn.setEnabled(True)
-        self.about_page.update_btn.setText("Проверить обновления")
-        if release is None:
-            if manual:
-                QMessageBox.warning(self, "Обновление", f"Не удалось проверить: {error}")
+        if release is None or not updatecheck.newer(release.version):
             return
-        if not updatecheck.newer(release.version):
-            if manual:
-                QMessageBox.information(self, "Обновление",
-                                        f"Установлена последняя версия ({appinfo.VERSION}).")
+        if cfg.get("update/skipped") == release.version:
             return
-        if not manual:
-            if cfg.get("update/skipped") == release.version:
-                return
-            if cfg.get("update/shown") == release.version:
-                return  # эту версию уже показывали — не докучать каждые 5 минут
-            cfg.set_("update/shown", release.version)
-            if cfg.get("update/auto_install"):
-                self._auto_install(release)
-                return
-        self.show_update_window(release, manual)
+        if cfg.get("update/shown") == release.version:
+            return  # эту версию уже обрабатывали — не докучать каждые 5 минут
+        cfg.set_("update/shown", release.version)
+        if cfg.get("update/auto_install"):
+            self._auto_install(release)
 
     def _auto_install(self, release):
-        """Автообновление в фоне: скачать установщик и запустить его без окна-вопроса.
-        Запоминаем, было ли окно в трее, — после установки оно туда же и вернётся."""
+        """Автообновление: уведомить и в фоне скачать установщик, запустить его. Запоминаем,
+        было ли окно в трее, — после установки оно туда же и вернётся."""
+        self._notify_update(release)
         cfg.set_("update/pending", "1" if self.isHidden() else "0")
-        activity.record("update", f"Автообновление в фоне: {release.version}")
+        activity.record("update", f"Автообновление: {release.version}")
 
         def job():
             import updatecheck
@@ -151,43 +137,17 @@ class DatabasesMixin:
 
         threading.Thread(target=job, daemon=True, name="release-auto-install").start()
 
-    def show_update_window(self, release, manual: bool = False):
-        """Обычное окно поверх окон StretchBIT: скачать установщик новой версии в «Загрузки».
-        При автопроверке — ещё и уведомление Windows."""
-        from ui.update_window import UpdateWindow
-        win = getattr(self, "update_window", None)
-        if win is not None and win.isVisible():
-            win.raise_()
-            win.activateWindow()
-            return
-        win = UpdateWindow(release, self)
-        self.update_window = win
-        win.show()
-        win.raise_()
-        win.activateWindow()
-        if not manual:
-            self._notify_release(release)
-
-    def _notify_release(self, release):
-        """Уведомление Windows о новой версии (без него — через значок в трее)."""
+    def _notify_update(self, release):
+        """Уведомление Windows «сейчас будет обновление» (без него — через значок в трее)."""
         shown = self.notifier.show(
-            "Доступно обновление",
-            f"Появилась новая версия StretchBIT {release.version}.",
-            [("Открыть", "open"), ("Позже", "later")], self._on_release_toast)
+            "Обновление StretchBIT",
+            f"Сейчас будет обновление StretchBIT {release.version}.",
+            [], lambda argument: None)
         if not shown and self.tray is not None:
             self.tray.showMessage(
-                "Доступно обновление",
-                f"Появилась новая версия StretchBIT {release.version}.",
+                "Обновление StretchBIT",
+                f"Сейчас будет обновление StretchBIT {release.version}.",
                 QSystemTrayIcon.MessageIcon.Information, 12000)
-
-    def _on_release_toast(self, argument):
-        if argument not in ("open", ""):
-            return
-        win = getattr(self, "update_window", None)
-        if win is not None:
-            win.show()
-            win.raise_()
-            win.activateWindow()
 
     def auto_update_check(self):
         if getattr(self, "service", None) is not None:

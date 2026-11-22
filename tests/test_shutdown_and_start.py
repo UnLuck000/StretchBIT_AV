@@ -122,9 +122,11 @@ def test_service_recover_vpn_uses_selfguard(svc, monkeypatch):
 
 
 def test_background_auto_update_wiring():
-    """Автообновление в фоне: настройка под пароль, скачивание без вопроса, возврат в трей."""
+    """Автообновление по умолчанию: уведомление, скачивание без вопроса, возврат в трей."""
     gui = (Path(__file__).resolve().parent.parent / "gui.py").read_text(encoding="utf-8")
     assert "update/pending" in gui            # метка «было в трее» перед запуском установщика
     db = (Path(__file__).resolve().parent.parent / "mainwindow" / "databases.py").read_text(
         encoding="utf-8")
-    assert "update/auto_install" in db        # гейт: скачать и запустить установщик без вопроса
+    assert "update/auto_install" in db        # гейт автообновления
+    assert "Сейчас будет обновление" in db    # уведомление Windows перед установкой
+    assert "show_update_window" not in db     # ручного окна-вопроса больше нет
