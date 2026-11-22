@@ -129,7 +129,27 @@ class DatabasesMixin:
             if cfg.get("update/shown") == release.version:
                 return  # эту версию уже показывали — не докучать каждые 5 минут
             cfg.set_("update/shown", release.version)
+            if cfg.get("update/auto_install"):
+                self._auto_install(release)
+                return
         self.show_update_window(release, manual)
+
+    def _auto_install(self, release):
+        """Автообновление в фоне: скачать установщик и запустить его без окна-вопроса.
+        Запоминаем, было ли окно в трее, — после установки оно туда же и вернётся."""
+        cfg.set_("update/pending", "1" if self.isHidden() else "0")
+        activity.record("update", f"Автообновление в фоне: {release.version}")
+
+        def job():
+            import updatecheck
+            try:
+                path = updatecheck.download(release)
+                updatecheck.run_installer(path)
+            except Exception as e:  # noqa: BLE001 — попробуем ещё раз при следующей проверке
+                cfg.set_("update/shown", "")
+                activity.record("update", f"Автообновление не удалось: {e}")
+
+        threading.Thread(target=job, daemon=True, name="release-auto-install").start()
 
     def show_update_window(self, release, manual: bool = False):
         """Обычное окно поверх окон StretchBIT: скачать установщик новой версии в «Загрузки».

@@ -14,6 +14,7 @@
      <property name="title"><string>Запуск</string></property>
      <layout class="QVBoxLayout" name="layoutStartup">
       <item><widget class="QCheckBox" name="chkAutostart"><property name="toolTip"><string>Задание планировщика Windows при входе в систему, с наивысшими правами: программа запускается от администратора без окна UAC. Создать или убрать задание можно только из программы, запущенной от администратора.</string></property><property name="text"><string>Запускать вместе с Windows (с правами администратора)</string></property></widget></item>
+       <item><widget class="QCheckBox" name="chkAutoUpdate"><property name="toolTip"><string>Новую версию программа скачает и запустит её установщик сама, без вопроса (появится мастер установщика). После установки окно вернётся туда, где было: в трей или на экран.</string></property><property name="text"><string>Автообновление в фоне</string></property></widget></item>
      </layout>
     </widget>
    </item>

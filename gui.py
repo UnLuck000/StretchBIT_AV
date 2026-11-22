@@ -829,7 +829,21 @@ if __name__ == "__main__":
         activity.record("program", "Программа была завершена не штатно и перезапущена сторожем")
         window.add_event("Программа была завершена не штатно — защита перезапущена", "warning")
 
-    quiet_start = (autostart or bool(analyze_path)) and tray_ok
+    # автообновление в фоне: установщик закрыл и снова запустил программу — вернуть окно туда,
+    # где оно было (в трей или на экран) и сообщить об установленном обновлении
+    auto_hidden = cfg.get("update/pending")
+    stay_hidden = False
+    if auto_hidden:
+        cfg.set_("update/pending", "")
+        window.add_event(f"Установлено обновление StretchBIT {appinfo.VERSION}", "info")
+        if auto_hidden == "1" and tray_ok:
+            stay_hidden = True
+            if window.tray is not None:
+                window.tray.showMessage(appinfo.SHORT_NAME,
+                                        f"Установлено обновление {appinfo.VERSION}",
+                                        QSystemTrayIcon.MessageIcon.Information, 8000)
+
+    quiet_start = (autostart or bool(analyze_path) or stay_hidden) and tray_ok
     if not quiet_start:
         window.show()
     if analyze_path:
