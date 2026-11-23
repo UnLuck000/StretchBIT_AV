@@ -811,7 +811,6 @@ if __name__ == "__main__":
         if is_admin():
             cfg.ensure_autostart()  # задание входа (возврат сети после VPN) — с правами
         cfg.ensure_explorer_menu()  # пункт «Проверить в ...» в меню файлов — всегда
-        cfg.ensure_start_menu()     # ярлык в меню «Пуск» (.zip-версия) — при первом открытии
 
     if not passive:  # задание и меню Проводника общие у версий — их ведёт основная
         threading.Thread(target=_ensure_registration, name="startup-registration",

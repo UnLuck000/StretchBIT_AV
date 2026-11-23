@@ -414,36 +414,6 @@ def ensure_explorer_menu() -> None:
         pass
 
 
-def ensure_start_menu() -> None:
-    """Ярлык в меню «Пуск» текущего пользователя. Для .zip-версии ставится при первом
-    открытии (установщик ставит свой ярлык сам — [Icons] в installer.iss)."""
-    if sys.platform != "win32":
-        return
-    programs = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / \
-        "Start Menu" / "Programs"
-    shortcut = programs / f"{appinfo.APP_NAME}.lnk"
-    if shortcut.exists():
-        return
-    if getattr(sys, "frozen", False):
-        exe, args, workdir = sys.executable, "", str(Path(sys.executable).parent)
-    else:
-        pythonw = Path(sys.executable).with_name("pythonw.exe")
-        interpreter = pythonw if pythonw.exists() else Path(sys.executable)
-        exe, args, workdir = str(interpreter), f'"{PROJECT_DIR / "gui.py"}"', str(PROJECT_DIR)
-    script = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK);"
-              "$s.TargetPath=$env:TARGET;$s.Arguments=$env:ARGS;"
-              "$s.WorkingDirectory=$env:DIR;$s.Save()")
-    try:
-        programs.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                       env={**os.environ, "LNK": str(shortcut), "TARGET": exe,
-                            "ARGS": args, "DIR": workdir},
-                       capture_output=True, timeout=30,
-                       creationflags=0x08000000)  # CREATE_NO_WINDOW
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-
 def explorer_current() -> bool:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, EXPLORER_KEY + r"\command") as key:
