@@ -1,10 +1,10 @@
 APP_NAME = "StretchBIT"
 SHORT_NAME = "SBIT"
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 YEAR = 2026
-AUTHOR = "Владимир"                         # TODO: впишите автора
+AUTHOR = "VOVAN"
 ORGANIZATION = ""                           # TODO: школа или университет
-SUPERVISOR = ""                             # TODO: руководитель (можно оставить пустым)
+SUPERVISOR = ""                             # TODO: Удалить данную вкладку
 REPO_URL = "https://github.com/UnLuck000/StretchBIT_AV"
 RELEASES_URL = REPO_URL + "/releases"
 
