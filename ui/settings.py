@@ -23,7 +23,8 @@ LEGACY_EXPLORER_KEY = r"Software\Classes\*\shell\StudyAV"  # пункт меню
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
-    "startup/autostart": True,      # задание планировщика при входе в Windows (с правами)
+    "startup/autostart": False,     # автозапуск всей программы (задание входа: по умолчанию
+                                    # только возврат сети после VPN — --recover-network)
     "advanced/warned": False,       # предупреждение при первом открытии доп. настроек уже было
     "vpn/autostart": False,         # подключать VPN вместе с программой (профиль автоподключения)
     "vpn/xray_path": "",            # xray.exe (пусто — искать самостоятельно, vpn/xray.py)
@@ -273,12 +274,14 @@ LEGACY_TASK = "StudyAV"  # задание прежних версий: заме�
 
 
 def _autostart_parts() -> tuple[str, str]:
-    """(программа, аргументы) для задания планировщика."""
+    """(программа, аргументы) для задания планировщика. По умолчанию — лёгкий возврат сети
+    после сбоя VPN (--recover-network); при включённом автозапуске всей программы — она целиком."""
+    args = "--autostart" if get("startup/autostart") else "--recover-network"
     if getattr(sys, "frozen", False):
-        return sys.executable, "--autostart"
+        return sys.executable, args
     pythonw = Path(sys.executable).with_name("pythonw.exe")  # без окна консоли
     interpreter = pythonw if pythonw.exists() else Path(sys.executable)
-    return str(interpreter), f'"{PROJECT_DIR / "gui.py"}" --autostart'
+    return str(interpreter), f'"{PROJECT_DIR / "gui.py"}" {args}'
 
 
 def _autostart_command() -> str:
@@ -328,13 +331,15 @@ def autostart_enabled() -> bool:
 
 
 def autostart_current() -> bool:
-    """Задание есть и запускает именно эту копию программы (папку могли перенести)."""
+    """Задание есть и запускает именно эту копию программы (папку могли перенести) в
+    правильном режиме (лёгкий возврат сети --recover-network или вся программа --autostart)."""
     result = _schtasks("/Query", "/TN", TASK_NAME, "/XML")
     if result.returncode != 0:
         return False
-    exe, _ = _autostart_parts()
-    return exe.lower() in result.stdout.lower() and str(PROJECT_DIR).lower() in \
-        result.stdout.lower()
+    exe, args = _autostart_parts()
+    text = result.stdout.lower()
+    mode = "--recover-network" if "--recover-network" in args else "--autostart"
+    return exe.lower() in text and str(PROJECT_DIR).lower() in text and mode in text
 
 
 def set_autostart(enabled: bool) -> None:
@@ -368,15 +373,15 @@ def set_autostart(enabled: bool) -> None:
 
 
 def ensure_autostart() -> None:
-    """При запуске с правами: задание есть (по умолчанию включено) и указывает сюда."""
+    """При запуске с правами: задание есть всегда (возврат сети после сбоя VPN), а его режим
+    зависит от настройки «автозапуск всей программы» (startup/autostart): выключена — лёгкий
+    --recover-network, включена — вся программа (--autostart)."""
     try:
         if _schtasks("/Query", "/TN", LEGACY_TASK).returncode == 0:
             # задание со старым названием: убрать, а при включённой настройке создать новое
             _schtasks("/Delete", "/TN", LEGACY_TASK, "/F")
     except OSError:
         pass
-    if not get("startup/autostart"):
-        return
     try:
         if not autostart_current():
             set_autostart(True)
@@ -406,6 +411,36 @@ def ensure_explorer_menu() -> None:
         if not explorer_menu_enabled() or not explorer_current():
             set_explorer_menu(True)
     except OSError:
+        pass
+
+
+def ensure_start_menu() -> None:
+    """Ярлык в меню «Пуск» текущего пользователя. Для .zip-версии ставится при первом
+    открытии (установщик ставит свой ярлык сам — [Icons] в installer.iss)."""
+    if sys.platform != "win32":
+        return
+    programs = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / \
+        "Start Menu" / "Programs"
+    shortcut = programs / f"{appinfo.APP_NAME}.lnk"
+    if shortcut.exists():
+        return
+    if getattr(sys, "frozen", False):
+        exe, args, workdir = sys.executable, "", str(Path(sys.executable).parent)
+    else:
+        pythonw = Path(sys.executable).with_name("pythonw.exe")
+        interpreter = pythonw if pythonw.exists() else Path(sys.executable)
+        exe, args, workdir = str(interpreter), f'"{PROJECT_DIR / "gui.py"}"', str(PROJECT_DIR)
+    script = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK);"
+              "$s.TargetPath=$env:TARGET;$s.Arguments=$env:ARGS;"
+              "$s.WorkingDirectory=$env:DIR;$s.Save()")
+    try:
+        programs.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                       env={**os.environ, "LNK": str(shortcut), "TARGET": exe,
+                            "ARGS": args, "DIR": workdir},
+                       capture_output=True, timeout=30,
+                       creationflags=0x08000000)  # CREATE_NO_WINDOW
+    except (OSError, subprocess.SubprocessError):
         pass
 
 

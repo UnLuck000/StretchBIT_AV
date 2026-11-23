@@ -23,6 +23,29 @@ if "--watchdog" in sys.argv:  # сторож: перезапуск после н
         pass
     sys.exit(0)
 
+if "--recover-network" in sys.argv:  # автозапуск: только возврат сети после сбоя VPN
+    import selfguard
+    try:
+        report = selfguard.recover_network()
+        if report:
+            selfguard._note(f"автозапуск: сеть после VPN: {'; '.join(report)}")
+    except Exception as e:  # noqa: BLE001 — автозапуск не должен мешать входу в систему
+        selfguard._note(f"автозапуск: возврат сети не удался: {e}")
+    sys.exit(0)
+
+if "--set-autostart" in sys.argv:  # установщик: включить/выключить автозапуск всей программы
+    from ui import settings as _cfg
+    try:
+        on = sys.argv[sys.argv.index("--set-autostart") + 1] == "on"
+    except IndexError:
+        sys.exit(2)
+    try:
+        _cfg.set_("startup/autostart", on)
+        _cfg.set_autostart(True)  # задание входа есть всегда: аргументы — по настройке
+    except OSError:
+        pass
+    sys.exit(0)
+
 if any(a.startswith("--service") for a in sys.argv[1:]):
     # служба Windows и её установка (service/main.py): до Qt и папки конфигурации
     # пользователя — у службы свои данные в ProgramData
@@ -786,8 +809,9 @@ if __name__ == "__main__":
     def _ensure_registration():
         # schtasks — до секунды на вызов (а с проверкой прежнего задания их три): в фоне
         if is_admin():
-            cfg.ensure_autostart()  # задание планировщика (создаётся только с правами)
+            cfg.ensure_autostart()  # задание входа (возврат сети после VPN) — с правами
         cfg.ensure_explorer_menu()  # пункт «Проверить в ...» в меню файлов — всегда
+        cfg.ensure_start_menu()     # ярлык в меню «Пуск» (.zip-версия) — при первом открытии
 
     if not passive:  # задание и меню Проводника общие у версий — их ведёт основная
         threading.Thread(target=_ensure_registration, name="startup-registration",

@@ -28,6 +28,17 @@ EXECUTABLE_EXTS = {
     ".hta", ".lnk", ".url", ".jar", ".reg", ".inf", ".application", ".appx", ".msix",
 }
 
+# папки документов пользователя: файлы тут — чаще всего «свои», но именно сюда и падают
+# вредоносы из браузера и писем, поэтому проверяются все файлы
+USER_DOC_FOLDERS = ("Desktop", "Downloads", "Documents", "Pictures", "Videos", "Music")
+
+
+def user_key_folders(home: Path, full: bool = True) -> list[tuple[Path, bool, bool]]:
+    """Папки документов пользователя: (папка, с подпапками, все файлы). full — все папки;
+    иначе — только Downloads и Documents (для неведущих профилей)."""
+    names = USER_DOC_FOLDERS if full else ("Downloads", "Documents")
+    return [(home / name, True, True) for name in names]
+
 
 def system_folders() -> list[tuple[Path, bool, bool]]:
     """Системные папки, за которыми защита следит всегда: (папка, с подпапками, все файлы).
@@ -57,6 +68,8 @@ def system_folders() -> list[tuple[Path, bool, bool]]:
         (Path(env("PUBLIC", r"C:\Users\Public")), True, False),
         (Path(env("ProgramFiles", r"C:\Program Files")), True, False),
         (Path(env("ProgramFiles(x86)", r"C:\Program Files (x86)")), True, False),
+        # документы текущего пользователя (Desktop, Downloads, Documents, ...)
+        *user_key_folders(Path(env("USERPROFILE", str(Path.home())))),
     ]
     seen, result = set(), []
     for folder, recursive, all_files in folders:

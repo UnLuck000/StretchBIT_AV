@@ -604,8 +604,10 @@ class SettingsPage(_UiPage):
 
     def _on_autostart(self, checked: bool) -> None:
         try:
-            cfg.set_autostart(checked)
             cfg.set_("startup/autostart", checked)
+            # задание входа есть всегда (возврат сети после VPN): меняется только его режим —
+            # вся программа (--autostart) или лёгкий возврат сети (--recover-network)
+            cfg.set_autostart(True)
         except OSError as e:
             QMessageBox.warning(self, "Автозапуск", f"Не удалось изменить автозапуск: {e}")
             self.chk_autostart.blockSignals(True)
@@ -618,7 +620,7 @@ class SettingsPage(_UiPage):
             return
         cfg.reset()
         try:
-            cfg.set_autostart(cfg.get("startup/autostart"))  # по умолчанию — включён
+            cfg.set_autostart(True)  # задание всегда есть; после сброса — лёгкий --recover-network
         except OSError:
             pass
         self.load_values()

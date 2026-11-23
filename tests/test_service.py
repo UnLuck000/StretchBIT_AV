@@ -366,12 +366,29 @@ def test_service_folders_include_profiles(monkeypatch, tmp_path):
     from service import core as svc_core
     profile = tmp_path / "User"
     (profile / "AppData" / "Roaming").mkdir(parents=True)
-    monkeypatch.setattr(svc_core, "user_profiles", lambda: [profile])
+    (profile / "Downloads").mkdir(parents=True)
+    monkeypatch.setattr(svc_core, "profiles_by_recency", lambda: [(profile, 123)])
     folders = {str(f): (r, a) for f, r, a in svc_core.service_system_folders()}
     assert folders[str(profile / "AppData" / "Roaming")] == (True, False)
     startup = profile / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / \
         "Programs" / "Startup"
     assert folders[str(startup)] == (True, True)
+    # ведущий профиль (последний заходивший) — документы под защитой
+    assert folders[str(profile / "Downloads")] == (True, True)
+    assert folders[str(profile / "Desktop")] == (True, True)
+
+
+def test_service_folders_non_leading_profile_partial(monkeypatch, tmp_path):
+    """Неведущий профиль: только Downloads и Documents (без Desktop и прочих)."""
+    from service import core as svc_core
+    lead = tmp_path / "Lead"
+    other = tmp_path / "Other"
+    monkeypatch.setattr(svc_core, "profiles_by_recency",
+                        lambda: [(lead, 200), (other, 100)])
+    folders = {str(f) for f, _r, _a in svc_core.service_system_folders()}
+    assert str(other / "Downloads") in folders and str(other / "Documents") in folders
+    assert str(other / "Desktop") not in folders
+    assert str(lead / "Desktop") in folders  # ведущий — полностью
 
 
 def test_installer_and_uninstall_know_service():

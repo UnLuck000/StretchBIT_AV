@@ -90,10 +90,46 @@ def user_profiles() -> list[Path]:
     return out
 
 
+def profiles_by_recency() -> list[tuple[Path, int]]:
+    """Профили пользователей от недавно заходившего к давнему: (папка, время загрузки
+    профиля FILETIME). По ProfileLoadTimeHigh/Low из ProfileList — так видно, какими
+    учётными записями пользуются чаще и их папки защищаются в первую очередь."""
+    if sys.platform != "win32":
+        return []
+    import winreg
+    key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+    out = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
+            i = 0
+            while True:
+                try:
+                    sid = winreg.EnumKey(key, i)
+                except OSError:
+                    break
+                i += 1
+                if not sid.startswith("S-1-5-21-"):
+                    continue
+                try:
+                    with winreg.OpenKey(key, sid) as sub:
+                        raw = winreg.QueryValueEx(sub, "ProfileImagePath")[0]
+                        high = winreg.QueryValueEx(sub, "ProfileLoadTimeHigh")[0]
+                        low = winreg.QueryValueEx(sub, "ProfileLoadTimeLow")[0]
+                except OSError:
+                    continue
+                folder = Path(os.path.expandvars(raw))
+                if folder.is_dir():
+                    out.append((folder, (int(high) << 32) | int(low)))
+    except OSError:
+        pass
+    out.sort(key=lambda p: p[1], reverse=True)
+    return out
+
+
 def service_system_folders() -> list[tuple[Path, bool, bool]]:
     """Системные папки защиты для службы: у LocalSystem %APPDATA% и %TEMP% — профиль
     системы, поэтому папки автозагрузки и AppData берутся у каждого профиля пользователя."""
-    from monitor import system_folders
+    from monitor import system_folders, user_key_folders
     windows = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
     system_profile = os.path.join(windows, "system32", "config")
     result, seen = [], set()
@@ -108,11 +144,15 @@ def service_system_folders() -> list[tuple[Path, bool, bool]]:
         if not os.path.normcase(str(folder)).startswith(system_profile):
             add(folder, recursive, all_files)
     startup = Path("Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-    for profile in user_profiles():
+    for index, (profile, _load) in enumerate(profiles_by_recency()):
         roaming, local = profile / "AppData" / "Roaming", profile / "AppData" / "Local"
         add(roaming / startup, True, True)
         add(roaming, True, False)
         add(local, True, False)
+        # документы: у ведущего профиля (последний заходивший) — все папки, у остальных —
+        # только Downloads и Documents
+        for folder, recursive, all_files in user_key_folders(profile, full=index == 0):
+            add(folder, recursive, all_files)
     return result
 
 

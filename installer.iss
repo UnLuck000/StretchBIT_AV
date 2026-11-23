@@ -142,6 +142,7 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /reset /T /C /Q"; Flags: ru
 Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /C /Q"; Flags: runhidden
 ; служба защиты: создать или обновить (путь, автозапуск, перезапуск при сбое) и запустить
 Filename: "{app}\{#ExeName}"; Parameters: "--service-install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Устанавливаю службу защиты..."
+Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: autostart; StatusMsg: "Включаю автозапуск..."
 Filename: "{app}\{#ExeName}"; Description: "Запустить {#DisplayName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
