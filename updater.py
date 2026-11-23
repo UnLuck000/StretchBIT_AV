@@ -487,6 +487,14 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
 
 # ---------- правила YARA ----------
 RULES_ETAGS = ".etags.json"   # в community/: источник -> ETag последнего разобранного архива
+MAX_RULE = 8 * 2**20          # одно правило — не больше (обычные — десятки КБ)
+MAX_RULES_TOTAL = 256 * 2**20  # суммарно распакованных правил одного источника
+MAX_RULE_FILES = 20000        # файлов правил в архиве (signature-base — порядка 10 тыс.)
+
+
+def _zip_symlink(info) -> bool:
+    import stat
+    return stat.S_ISLNK(info.external_attr >> 16)
 
 
 def _download_changed(url: str, etag: str, timeout: int = DOWNLOAD_TIMEOUT) -> tuple[bytes | None, str]:
@@ -546,16 +554,34 @@ def update_rules(part=None) -> bool:
         fresh = COMMUNITY_RULES_DIR / f".{name}.new"
         shutil.rmtree(fresh, ignore_errors=True)
         fresh.mkdir(parents=True)
-        count = 0
+        count = total = 0
+        too_big = False
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            for item in zf.namelist():
-                if item.lower().endswith((".yar", ".yara")) and inner in item:
-                    # пишем под собственным именем, пути из архива не используем
-                    out = fresh / Path(item).name
-                    if out.exists():
-                        out = fresh / f"{Path(item).parent.name}_{Path(item).name}"
-                    out.write_bytes(zf.read(item))
-                    count += 1
+            for item in zf.infolist():
+                if item.is_dir() or _zip_symlink(item):
+                    continue
+                if not (item.filename.lower().endswith((".yar", ".yara"))
+                        and inner in item.filename):
+                    continue
+                if count >= MAX_RULE_FILES or item.file_size > MAX_RULE \
+                        or total + item.file_size > MAX_RULES_TOTAL:
+                    too_big = True
+                    break
+                body = zf.read(item)
+                if len(body) > MAX_RULE or total + len(body) > MAX_RULES_TOTAL:
+                    too_big = True
+                    break
+                # пишем под собственным именем, пути из архива не используем
+                out = fresh / Path(item.filename).name
+                if out.exists():
+                    out = fresh / f"{Path(item.filename).parent.name}_{Path(item.filename).name}"
+                out.write_bytes(body)
+                total += len(body)
+                count += 1
+        if too_big:
+            shutil.rmtree(fresh, ignore_errors=True)
+            print(f"Правила {name}: слишком много или крупных правил, оставлены прежние")
+            continue
         if count == 0:
             shutil.rmtree(fresh, ignore_errors=True)
             print(f"Правила {name}: в архиве нет файлов правил, оставлены прежние")

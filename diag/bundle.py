@@ -9,7 +9,8 @@
     service-logs/  — журналы службы (service.log, service-stdout.log из папки программы:
                      окно без прав пишет свои журналы в %LOCALAPPDATA%, а служба — туда);
   только тестовая версия (diag/edition.is_test):
-    feedback/      — комментарии testpanel (comments.jsonl, .log, снимки .png);
+    feedback/      — комментарии testpanel (comments.jsonl, .log); снимки .png — только
+                     с include_screenshots=True (не обезличиваются, по умолчанию нет);
     features/      — статусы функций: status.json и status.txt (как на странице
                      «Тестирование»), эталон «Исправно» baseline.json.
 
@@ -112,11 +113,13 @@ def _add_file(z: zipfile.ZipFile, path: Path, arcname: str) -> None:
                    else zipfile.ZIP_DEFLATED)
 
 
-def _add_folder(z: zipfile.ZipFile, folder: Path, prefix: str, progress=None) -> int:
+def _add_folder(z: zipfile.ZipFile, folder: Path, prefix: str, progress=None, skip=None) -> int:
     count = 0
     if not folder.is_dir():
         return 0
     for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        if skip is not None and skip(path):
+            continue
         try:
             _add_file(z, path, f"{prefix}/{path.relative_to(folder).as_posix()}")
             count += 1
@@ -142,8 +145,9 @@ def _snapshot() -> str:
     return scrub("\n".join(lines)) + "\n"
 
 
-def collect(target: Path, progress=None) -> dict:
-    """Собрать архив в target. Возвращает manifest (с числом файлов по разделам)."""
+def collect(target: Path, progress=None, include_screenshots: bool = False) -> dict:
+    """Собрать архив в target. Возвращает manifest (с числом файлов по разделам).
+    include_screenshots — включить снимки экрана (PNG не обезличиваются, по умолчанию нет)."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     # что скрывать: свои адреса, профили и серверы VPN (vpn/last_profile в снимке настроек,
@@ -173,7 +177,9 @@ def collect(target: Path, progress=None) -> dict:
             manifest["files"]["service-logs"] = count
         z.writestr("snapshot.txt", _snapshot())
         if test:
-            manifest["files"]["feedback"] = _add_folder(z, FEEDBACK, "feedback", progress)
+            manifest["files"]["feedback"] = _add_folder(
+                z, FEEDBACK, "feedback", progress,
+                skip=None if include_screenshots else lambda p: p.suffix.lower() == ".png")
             items = feature_status()
             z.writestr("features/status.json", json.dumps(items, ensure_ascii=False, indent=1))
             z.writestr("features/status.txt", _status_text(items))

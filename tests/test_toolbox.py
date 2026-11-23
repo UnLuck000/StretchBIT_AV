@@ -65,6 +65,18 @@ def test_link_check():
     assert check_url("https://bank.ru@evil.example/login", domains, set()).level == "warning"
 
 
+# noinspection HttpUrlsUsage
+def test_linkcheck_blocked_targets():
+    """Редирект не должен уводить в локальную/приватную сеть или на другую схему."""
+    from toolbox.linkcheck import _blocked_target
+    for url in ("http://127.0.0.1/x", "http://localhost/x", "http://10.1.2.3/x",
+                "http://192.168.0.1/x", "http://169.254.1.1/x", "http://[::1]/x",
+                "http://[fe80::1]/x", "ftp://example.com/x"):
+        assert _blocked_target(url), url
+    for url in ("https://example.com/x", "http://1.2.3.4/x"):
+        assert not _blocked_target(url), url
+
+
 def _shortcut(path: Path, target: str, args: str) -> None:
     script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK); "
               "$s.TargetPath = $env:TARGET; $s.Arguments = $env:ARGS; $s.Save()")

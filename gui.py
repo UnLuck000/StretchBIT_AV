@@ -97,7 +97,7 @@ from ui.tray import TrayIcon, load_app_icon
 from ui import access
 from ui.debug_mode import ask_password, load_gate
 from recovery import activity
-from ui.single_instance import SingleInstance
+from ui.single_instance import SingleInstance, instance_token
 from ui.exclusions_page import ExclusionsPage
 
 import appinfo
@@ -745,7 +745,8 @@ if __name__ == "__main__":
     analyze_path = _argument("--analyze")  # файл из меню Проводника
     # у релизной и тестовой — свои имена: иначе окно второй версии считало канал «занятым
     # чужой программой»
-    guard = SingleInstance("StretchBIT-test" if edition.is_test() else "StretchBIT")
+    guard = SingleInstance("StretchBIT-test" if edition.is_test() else "StretchBIT",
+                           token=instance_token())
     wait = 10.0 if "--relaunched" in sys.argv else 0.0  # ждём закрытия прежнего экземпляра
     message = (b"open\n" + analyze_path.encode("utf-8")) if analyze_path else b"show"
     # уже запущена: передаём ей файл или просьбу показать окно и выходим

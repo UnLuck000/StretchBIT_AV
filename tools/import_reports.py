@@ -12,8 +12,11 @@
 """
 import argparse
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -21,6 +24,13 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parent.parent
 DEST = ROOT / "user_reports"
 UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+# Защита от zip-бомбы: присланный архив распаковывается в временную папку и переносится
+# атомарно только после успешного завершения (аудит 21.11.2026, пункт про import_reports).
+MAX_FILES = 1000               # файлов в архиве
+MAX_ONE = 128 * 2 ** 20        # один файл, распакованный, байт
+MAX_TOTAL = 512 * 2 ** 20      # весь архив, распакованный, байт
+MAX_RATIO = 200                # распакованный / сжатый (выше — похоже на бомбу)
 
 
 def windows_folder(manifest: dict) -> str:
@@ -56,23 +66,48 @@ def import_zip(archive: Path, dest: Path = DEST, now: float | None = None) -> Pa
                              "StretchBIT") from None
         stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(now))
         target = _free(dest / windows_folder(manifest) / stamp)
-        target.mkdir(parents=True)
-        for info in z.infolist():
-            rel = PurePosixPath(info.filename.replace("\\", "/"))
-            if rel.is_absolute() or ".." in rel.parts or ":" in info.filename:
-                continue                        # путь за пределы папки — не распаковываем
-            out = target.joinpath(*rel.parts)
-            if info.is_dir():
-                out.mkdir(parents=True, exist_ok=True)
-                continue
-            out.parent.mkdir(parents=True, exist_ok=True)
-            with z.open(info) as src, open(out, "wb") as dst:
-                while chunk := src.read(1 << 20):
-                    dst.write(chunk)
-    (target / "source.txt").write_text(
-        f"Архив: {archive.name}\nРазобран: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(now))}\n"
-        f"Собран: {manifest.get('created')}\nВерсия: {manifest.get('version')} "
-        f"({manifest.get('edition')})\n", encoding="utf-8")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # распаковываем во временную папку, переносим в target только после полного успеха
+        tmp = Path(tempfile.mkdtemp(prefix=target.name + ".", dir=str(target.parent)))
+        files = total = 0
+        try:
+            for info in z.infolist():
+                rel = PurePosixPath(info.filename.replace("\\", "/"))
+                if rel.is_absolute() or ".." in rel.parts or ":" in info.filename:
+                    continue                    # путь за пределы папки — не распаковываем
+                out = tmp.joinpath(*rel.parts)
+                if info.is_dir():
+                    out.mkdir(parents=True, exist_ok=True)
+                    continue
+                files += 1
+                if files > MAX_FILES:
+                    raise ValueError(f"{archive.name}: больше {MAX_FILES} файлов")
+                if info.file_size > MAX_ONE or total + info.file_size > MAX_TOTAL:
+                    raise ValueError(f"{archive.name}: распакованный размер больше допустимого")
+                if info.file_size and info.compress_size and \
+                        info.file_size / info.compress_size > MAX_RATIO:
+                    raise ValueError(f"{archive.name}: подозрительный коэффициент сжатия")
+                out.parent.mkdir(parents=True, exist_ok=True)
+                written = 0
+                with z.open(info) as src, open(out, "wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        written += len(chunk)
+                        if written > MAX_ONE:
+                            raise ValueError(f"{archive.name}: файл {info.filename} больше "
+                                             "допустимого")
+                        dst.write(chunk)
+                total += written
+                if total > MAX_TOTAL:
+                    raise ValueError(f"{archive.name}: архив больше допустимого")
+            (tmp / "source.txt").write_text(
+                f"Архив: {archive.name}\n"
+                f"Разобран: {time.strftime('%d.%m.%Y %H:%M:%S', time.localtime(now))}\n"
+                f"Собран: {manifest.get('created')}\nВерсия: {manifest.get('version')} "
+                f"({manifest.get('edition')})\n", encoding="utf-8")
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+    os.replace(tmp, target)  # атомарно: в target архив появляется только целиком
     return target
 
 

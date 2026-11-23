@@ -86,4 +86,5 @@ def test_installer_handles_other_edition():
 
 def test_single_instance_name_per_edition():
     text = (ROOT / "gui.py").read_text(encoding="utf-8")
-    assert 'SingleInstance("StretchBIT-test" if edition.is_test() else "StretchBIT")' in text
+    assert 'SingleInstance("StretchBIT-test" if edition.is_test() else "StretchBIT"' in text
+    assert "token=instance_token()" in text  # имя канала — с токеном своей учётной записи

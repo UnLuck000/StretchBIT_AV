@@ -84,3 +84,14 @@ def test_missing_rules_folder_downloads_again(server):
     updater.update_rules()
     assert server["seen"][-1] == "" and server["full"] == 2       # ETag без правил не шлём
     assert (updater.COMMUNITY_RULES_DIR / "one" / "a.yar").exists()
+
+
+def test_rules_too_large_keeps_previous(server, monkeypatch):
+    """Слишком крупное правило — архив отклоняется, прежние правила остаются."""
+    monkeypatch.setattr(updater, "MAX_RULE", 30)  # маленький лимит для теста
+    updater.update_rules()  # "rule a { condition: true }" — 25 байт, проходит
+    big = "rule big { condition: true } /* " + "x" * 100 + " */"
+    server.update(etag='"v2"', body=_zip(big))  # больше 100 байт > 30
+    updater.update_rules()
+    assert (updater.COMMUNITY_RULES_DIR / "one" / "a.yar").read_text() == \
+        "rule a { condition: true }"

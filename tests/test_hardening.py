@@ -125,6 +125,22 @@ def test_quarantine_stores_file_neutralized(tmp_path, monkeypatch):
     assert src.read_bytes() == body and not stored.exists()
 
 
+def test_quarantine_list_skips_corrupted_json(tmp_path, monkeypatch):
+    """Один повреждённый .json не роняет весь список карантина."""
+    import json
+
+    import quarantine
+    monkeypatch.setattr(quarantine, "QUARANTINE_DIR", tmp_path / "q")
+    q = tmp_path / "q"
+    q.mkdir()
+    (q / "bad.json").write_text("{не json", encoding="utf-8")
+    (q / "good.json").write_text(json.dumps({
+        "id": "good", "status": "quarantined", "original_path": "C:\\x", "sha256": "a" * 64,
+        "quarantined_at": "2026-01-01T00:00:00"}), encoding="utf-8")
+    items = quarantine.list_quarantine()
+    assert [m["id"] for m in items] == ["good"]
+
+
 def test_quarantine_restores_items_of_old_versions(tmp_path, monkeypatch):
     """Записи без «encoding» (прежние версии) лежат как есть."""
     import json

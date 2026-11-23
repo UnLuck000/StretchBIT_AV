@@ -1,9 +1,32 @@
 import os
+import secrets
 import sys
 import time
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+MAX_COMMAND = 4096  # байт: больше одной команде не нужно (путь Windows — до 32767, но у нас короче)
+
+
+def instance_token() -> str:
+    """Случайный токен канала в папке конфигурации. Имя канала с этим токеном знает только
+    эта учётная запись: чужой процесс не может подключиться и слать команды show/open
+    (раньше канал был WorldAccess — достучаться мог кто угодно)."""
+    import userdata
+    path = userdata.CONFIG_DIR / "instance.token"
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    except OSError:
+        pass
+    token = secrets.token_hex(16)
+    userdata.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(token, encoding="utf-8")
+    os.replace(tmp, path)
+    return token
 
 
 def server_process(socket: QLocalSocket) -> tuple[int, str]:
@@ -39,9 +62,9 @@ class SingleInstance(QObject):
     activated = Signal()
     file_received = Signal(str)
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, token: str | None = None):
         super().__init__()
-        self.name = name
+        self.name = f"{name}-{token}" if token else name  # токен: имя знает только свой пользователь
         self._server: QLocalServer | None = None
         # имя канала заняла чужая программа: (PID, путь). Раньше программа считала, что уже
         # запущена, и молча выходила — любой процесс без прав мог так не дать ей запуститься
@@ -101,10 +124,13 @@ class SingleInstance(QObject):
             conn.disconnected.connect(conn.deleteLater)
 
     def _read(self, conn: QLocalSocket):
+        if conn.bytesAvailable() > MAX_COMMAND:  # ненормально большая команда — не читаем
+            conn.abort()
+            return
         data = bytes(conn.readAll())
         if data.startswith(b"open\n"):
             path = data[5:].decode("utf-8", "replace").strip()
-            if path:
+            if path and len(path) <= 32767 and "\x00" not in path:
                 self.file_received.emit(path)
         elif data.strip() == b"show":
             self.activated.emit()

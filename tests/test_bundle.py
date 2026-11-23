@@ -48,15 +48,28 @@ def test_test_edition_has_feedback_and_statuses(sandbox, monkeypatch):
     manifest = bundle.collect(out)
     names = _names(out)
     assert {"manifest.json", "snapshot.txt", "logs/app.log", "logs/crash.log",
-            "feedback/comments.jsonl", "feedback/20261109-120000_scan.png",
-            "features/status.json", "features/status.txt"} <= names
-    assert manifest["edition"] == "test" and manifest["files"]["feedback"] == 2
+            "feedback/comments.jsonl", "features/status.json",
+            "features/status.txt"} <= names
+    # снимки экрана не обезличиваются — по умолчанию в архив не входят
+    assert "feedback/20261109-120000_scan.png" not in names
+    assert manifest["edition"] == "test" and manifest["files"]["feedback"] == 1
     with zipfile.ZipFile(out) as z:
         log = z.read("logs/app.log").decode("utf-8")
         status = json.loads(z.read("features/status.json"))
     assert f"\\{user}\\" not in log and "%USERPROFILE%" in log      # обезличено
     assert next(s for s in status if s["id"] == "scan.file")["state"] == "verified"
     assert not out.with_name("info.zip.part").exists()
+
+
+def test_test_edition_screenshots_opt_in(sandbox, monkeypatch):
+    """Снимки экрана попадают в архив только явно: include_screenshots=True."""
+    tmp, _ = sandbox
+    monkeypatch.setattr(edition, "_edition", edition.TEST)
+    out = tmp / "info.zip"
+    manifest = bundle.collect(out, include_screenshots=True)
+    names = _names(out)
+    assert "feedback/20261109-120000_scan.png" in names
+    assert manifest["files"]["feedback"] == 2
 
 
 def test_release_edition_without_feedback(sandbox, monkeypatch):
@@ -97,6 +110,22 @@ def test_import_rejects_escape_and_foreign_zip(tmp_path):
         z.writestr("readme.txt", "x")
     with pytest.raises(ValueError):
         import_reports.import_zip(other, tmp_path / "dest")
+
+
+def test_import_rejects_zip_bomb_and_leaves_no_temp(tmp_path):
+    """Очень сжимаемый файл (zip-бомба) отклоняется по коэффициенту сжатия; временная
+    папка не остаётся."""
+    bomb = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps({"windows": {"caption": "Windows 10",
+                                                            "build": "19045"}}))
+        z.writestr("logs/bomb.txt", b"\x00" * (5 * 1024 * 1024))  # 5 МБ нулей — ratio ~1000
+    dest = tmp_path / "dest"
+    with pytest.raises(ValueError):
+        import_reports.import_zip(bomb, dest)
+    # временная папка удалена: осталась только пустая папка Windows (без target и temp)
+    parent = dest / "Windows 10 (19045)"
+    assert not parent.exists() or not any(parent.iterdir())
 
 
 def test_service_logs_in_bundle(sandbox, monkeypatch):

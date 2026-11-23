@@ -27,6 +27,12 @@ def test_subscription_parse_and_merge():
         "upload": 1, "download": 2, "total": 3, "expire": 4}
     with pytest.raises(ValueError, match="https"):
         subscriptions.new("x", "http://example.com/sub")
+    # редирект подписки не должен уводить на http или в локальную/приватную сеть
+    assert subscriptions._blocked("http://example.com/sub")
+    assert subscriptions._blocked("https://127.0.0.1/sub")
+    assert subscriptions._blocked("https://192.168.1.1/sub")
+    assert subscriptions._blocked("https://[::1]/sub")
+    assert not subscriptions._blocked("https://provider.example/sub")
     sub = subscriptions.new("", "https://provider.example/sub/token")
     assert sub.name == "provider.example"
     mine = profiles.Profile(name="Нидерланды", kind="demo", server="x")

@@ -8,6 +8,9 @@ from pathlib import Path
 from scanner.hashing import sha256_of, load_signatures
 from scanner.whitelist import add_to_whitelist
 from scanner.signature import describe, inspect_signature
+from diag.log import get as _log
+
+log = _log("quarantine")
 
 QUARANTINE_DIR = Path("quarantine_data").resolve()
 SIGNATURES_FILE = Path("signatures/hashes.txt")
@@ -49,6 +52,37 @@ def _xor_copy(src: Path, dst: Path) -> None:
     """Копия src в dst через XOR (операция обратима: тем же вызовом обратно)."""
     with open(src, "rb") as fin, open(dst, "wb") as fout:
         _xor_stream(fin, fout)
+
+
+def _file_key(f) -> tuple | None:
+    """(том, индекс) файла по открытому дескриптору (Windows FileId). Не Windows или
+    сбой чтения — None (проверку пропускаем)."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    class _Info(ctypes.Structure):  # BY_HANDLE_FILE_INFORMATION
+        _fields_ = [("attr", wintypes.DWORD), ("created", wintypes.FILETIME),
+                    ("accessed", wintypes.FILETIME), ("written", wintypes.FILETIME),
+                    ("volume", wintypes.DWORD), ("size_high", wintypes.DWORD),
+                    ("size_low", wintypes.DWORD), ("links", wintypes.DWORD),
+                    ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD)]
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    info = _Info()
+    if not k.GetFileInformationByHandle(wintypes.HANDLE(f.fileno()), ctypes.byref(info)):
+        return None
+    return (info.volume, info.index_high, info.index_low)
+
+
+def _same_file(path: Path, key: tuple | None) -> bool:
+    """Путь всё ещё ведёт к тому же файлу, что читали (защита от подмены между шагами)."""
+    if key is None:
+        return True  # не Windows или сведения не прочитать — не блокируем
+    try:
+        with open(path, "rb") as f:
+            return _file_key(f) == key
+    except OSError:
+        return False
 
 
 def _xor_stream(fin, fout, digest=None, plain_in: bool = True) -> int:
@@ -153,6 +187,7 @@ def set_remote(backend) -> None:
 def quarantine_file(path: Path, reason: str) -> str:
     """Перемещает файл в карантин и возвращает его идентификатор. NeedAdmin — нет прав на
     папку карантина; PermissionError — файл занят."""
+    import hashlib
     if _remote is not None:
         return _remote.quarantine_file(path, reason)
     _check_writable()
@@ -165,24 +200,31 @@ def quarantine_file(path: Path, reason: str) -> str:
         signature_text = ""
 
     item_id = uuid.uuid4().hex
-    meta = {
-        "id": item_id,
-        "status": STATUS_QUARANTINED,
-        "original_path": str(path),
-        "sha256": sha256_of(path),
-        "size": path.stat().st_size,
-        "reason": reason,
-        "signature": signature_text,
-        "quarantined_at": _now(),
-        "encoding": ENCODING,
-    }
-
-    _write_meta(meta)
     stored = _stored_path(item_id)
+    digest = hashlib.sha256()
     try:
-        _xor_copy(path, stored)
+        # один дескриптор на хэш и копию: между ними файл не подменяется (раньше был
+        # sha256_of() → снова открыть → удалить по пути — другой процесс мог подменить файл)
+        with open(path, "rb") as fin:
+            key = _file_key(fin)
+            with open(stored, "wb") as fout:
+                size = _xor_stream(fin, fout, digest)
+            if not _same_file(path, key):
+                raise OSError("файл был подменён во время изоляции")
+        meta = {
+            "id": item_id,
+            "status": STATUS_QUARANTINED,
+            "original_path": str(path),
+            "sha256": digest.hexdigest(),
+            "size": size,
+            "reason": reason,
+            "signature": signature_text,
+            "quarantined_at": _now(),
+            "encoding": ENCODING,
+        }
+        _write_meta(meta)
         path.unlink()  # исходный файл убираем только после готовой копии
-    except Exception:
+    except BaseException:
         stored.unlink(missing_ok=True)
         _meta_path(item_id).unlink(missing_ok=True)
         raise
@@ -256,17 +298,21 @@ def restore_stream(item_id: str, fout, dest: str = "", whitelist: bool = True) -
 
 def list_quarantine(include_history: bool = False) -> list[dict]:
     """По умолчанию возвращает только файлы, которые сейчас в карантине.
-    С include_history=True добавляет восстановленные и удалённые записи."""
+    С include_history=True добавляет восстановленные и удалённые записи.
+    Одна повреждённая запись не роняет весь список: пропускается и журналируется."""
     if _remote is not None:
         return _remote.list_quarantine(include_history)
     if not QUARANTINE_DIR.exists():
         return []
     items = []
     for meta_file in QUARANTINE_DIR.glob("*.json"):
-        meta = _read_meta(meta_file.stem)
-        if include_history or meta["status"] == STATUS_QUARANTINED:
-            items.append(meta)
-    return sorted(items, key=lambda m: m["quarantined_at"])
+        try:
+            meta = _read_meta(meta_file.stem)
+            if include_history or meta["status"] == STATUS_QUARANTINED:
+                items.append(meta)
+        except Exception as e:  # noqa: BLE001 — битая запись не должна ломать весь журнал
+            log.warning("Карантин: пропущена повреждённая запись %s: %s", meta_file.name, e)
+    return sorted(items, key=lambda m: m.get("quarantined_at", ""))
 
 
 def restore_file(item_id: str, overwrite: bool = False, whitelist: bool = True) -> Path:
