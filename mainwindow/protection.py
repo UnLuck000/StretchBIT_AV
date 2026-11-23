@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from monitor import RealtimeMonitor, system_folders
+from monitor import RealtimeMonitor
 from processmanager.system import is_admin
 from quarantine import QUARANTINE_DIR
 from recovery import activity, threatlog
@@ -153,7 +153,7 @@ class ProtectionMixin:
     # ---------- вкладка «Защита» (мониторинг) ----------
     def _build_protection_tab(self) -> QWidget:
         from ui.protection_page import ProtectionPage
-        page = ProtectionPage(system_folders())
+        page = ProtectionPage()
         self.protection_page = page
         self.watch_list = page.watch_list
         for folder in self._load_watch_folders():
@@ -455,7 +455,7 @@ class ProtectionMixin:
         self.protection_page.refit()
 
     def _protect_line(self, text: str, path: str, color: str):
-        item = QListWidgetItem(f"{time.strftime('%H:%M:%S')}  {text}")
+        item = QListWidgetItem(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {text}")
         if path:
             item.setData(ID_ROLE, path)
             item.setToolTip("Правый клик: в карантин, открыть в сканере, показать в проводнике")
@@ -829,6 +829,10 @@ class ProtectionMixin:
                 color = {"threat": "red", "error": "darkorange"}.get(kind, "gray")
                 shown = text.replace("\t", " — ") if kind == "threat" else text
                 item = QListWidgetItem(f"{ev.get('time', '')}  {shown}")
+                if kind == "scanned" and text.startswith("OK: "):
+                    item.setData(ID_ROLE, text[4:])  # чистый файл: правый клик тоже работает
+                elif kind == "threat":
+                    item.setData(ID_ROLE, text.split("\t", 1)[0])
                 item.setForeground(QBrush(QColor(color)))
                 self.add_protect_item(item)
             return
@@ -1039,8 +1043,10 @@ class ProtectionMixin:
             self.refresh_quarantine()
             self.statusBar().showMessage(text)
             self.add_event(f"Угроза: {os.path.basename(path)} ({reason})", "threat")
+        elif kind == "scanned" and text.startswith("OK: "):
+            path = text[4:]  # проверенный (чистый) файл: правый клик — сканер/Проводник
 
-        item = QListWidgetItem(f"{time.strftime('%H:%M:%S')}  {text}")
+        item = QListWidgetItem(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {text}")
         if path:
             item.setData(ID_ROLE, path)
             item.setToolTip("Правый клик: в карантин, открыть в сканере, показать в проводнике")

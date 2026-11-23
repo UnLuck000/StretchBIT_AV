@@ -435,7 +435,7 @@ class ServiceCore:
                 self._events.pop()
             self._seq += 1
             event = {"seq": self._seq, "kind": kind, "text": text, "run": run,
-                     "time": time.strftime("%H:%M:%S")}
+                     "time": time.strftime("%Y-%m-%d %H:%M:%S")}
             if data is not None:
                 event["data"] = data
             self._events.append(event)

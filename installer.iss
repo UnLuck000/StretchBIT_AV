@@ -96,12 +96,16 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=no
+; лицензионное соглашение (заглушка — текст позже): «Далее» неактивно, пока не принято
+LicenseFile=docs\EULA.txt
 
 [Languages]
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Ярлык на рабочем столе"; GroupDescription: "Ярлыки:"
+Name: "startmenuicon"; Description: "Ярлык в меню «Пуск»"; GroupDescription: "Ярлыки:"
+Name: "autostart"; Description: "Запускать вместе с Windows"; GroupDescription: "Автозапуск:"; Flags: unchecked
 
 [Dirs]
 ; папки данных — только для программы с правами (запись пользователям не выдаётся)
@@ -125,9 +129,9 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\app\native\windivert"; F
 Source: "{#SourceDir}\app\native\windivert\*"; DestDir: "{app}\app\native\windivert"; Flags: restartreplace uninsrestartdelete skipifsourcedoesntexist
 
 [Icons]
-Name: "{autoprograms}\{#DisplayName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"
+Name: "{autoprograms}\{#DisplayName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Tasks: startmenuicon
 Name: "{autodesktop}\{#DisplayName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{autoprograms}\Удалить {#DisplayName}"; Filename: "{uninstallexe}"
+Name: "{autoprograms}\Удалить {#DisplayName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 
 [Run]
 ; владелец — «Администраторы» (файлы прежней установки без прав принадлежали пользователю, а

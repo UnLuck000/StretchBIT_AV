@@ -3,7 +3,7 @@
 Только внешний вид: запуск и остановка защиты, папки и журнал — в gui.MainWindow, которое
 берёт отсюда виджеты (watch_list, protect_btn, protect_status, protect_log, decoys_label...).
 """
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget,
@@ -43,7 +43,7 @@ def _card(title: str) -> tuple[QFrame, QVBoxLayout]:
 
 
 class ProtectionPage(QWidget):
-    def __init__(self, system_folders: list):
+    def __init__(self):
         super().__init__()
         self.setStyleSheet(STYLE)
         root = QVBoxLayout(self)
@@ -97,38 +97,17 @@ class ProtectionPage(QWidget):
         layout.addLayout(row)
         grid.addWidget(card, 0, 0)
 
-        # ---------- что ещё под защитой ----------
-        card, layout = _card("Также под защитой")
-        system_tip = "\n".join(
-            f"{folder}{'' if recursive else '  (без подпапок)'}"
-            f"{'  — все файлы' if all_files else ''}" for folder, recursive, all_files in
-            system_folders)
-        system_row, _, _ = self._item(
-            "🖥️", f"Системные папки ({len(system_folders)})",
-            "Windows, автозагрузка, AppData, Program Files: программы и скрипты. Список — "
-            "при наведении.")
-        system_row.setToolTip(system_tip)
-        layout.addWidget(system_row)
-        decoys_row, self.decoys_label, decoys_layout = self._item(
-            "🪤", "Ловушки для шифровальщиков", "")
+        # ---------- слои защиты ----------
+        # Карточка «Также под защитой» убрана: статусы слоёв (ловушки, флешки, запуск,
+        # стилеры, AMSI, 4104, память) обновляет gui — виджеты остаются, но не показываются.
+        self.decoys_label = _label("")
         self.decoys_btn = QPushButton("Открыть папку")
-        decoys_layout.addWidget(self.decoys_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(decoys_row)
-        usb_row, self.usb_label, _ = self._item("🔌", "Флешки", "")
-        layout.addWidget(usb_row)
-        launch_row, self.launch_label, _ = self._item("🚦", "Запуск программ", "")
-        layout.addWidget(launch_row)
-        stealer_row, self.stealer_label, _ = self._item("🔐", "Пароли и cookies браузеров", "")
-        layout.addWidget(stealer_row)
-        amsi_row, self.amsi_label, _ = self._item("📜", "Скрипты и макросы (AMSI)", "")
-        layout.addWidget(amsi_row)
-        pslog_row, self.pslog_label, _ = self._item("🧾", "Журнал скриптов PowerShell", "")
-        layout.addWidget(pslog_row)
-        memwatch_row, self.memwatch_label, _ = self._item("🧠", "Память процессов", "")
-        layout.addWidget(memwatch_row)
-        layout.addStretch()
-        self.also_card = card
-        grid.addWidget(card, 0, 1)
+        self.usb_label = _label("")
+        self.launch_label = _label("")
+        self.stealer_label = _label("")
+        self.amsi_label = _label("")
+        self.pslog_label = _label("")
+        self.memwatch_label = _label("")
 
         # ---------- полная проверка ----------
         card, layout = _card("Проверка дисков")
@@ -185,7 +164,7 @@ class ProtectionPage(QWidget):
             bar.addWidget(button)
         self.schedule_bar.setVisible(False)
         layout.addWidget(self.schedule_bar)
-        grid.addWidget(card, 1, 0, 1, 2)
+        grid.addWidget(card, 0, 1)  # на месте «Также под защитой»
 
         # ---------- журнал ----------
         card, layout = _card("Журнал защиты")
@@ -207,27 +186,18 @@ class ProtectionPage(QWidget):
         self.protect_log.setMinimumHeight(160)
         layout.addWidget(self.protect_log, 1)
         self.clear_log_btn.clicked.connect(self.protect_log.clear)
-        grid.addWidget(card, 2, 0, 1, 2)
+        grid.addWidget(card, 1, 0, 1, 2)
 
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
-        grid.setRowStretch(2, 1)  # верхние карточки — по содержимому, остальное — журналу
+        grid.setRowStretch(1, 1)  # верхние карточки — по содержимому, остальное — журналу
         root.addLayout(grid, 1)
         self.set_running(False)
         from ui.widgets import guard_wheel
         guard_wheel(self)  # список дисков: колесо прокручивает страницу
 
     def refit(self) -> None:
-        """Высота карточки «Также под защитой» — по тексту с переносами: сетка сама не
-        учитывает перенос строк и обрезает пояснения. Вызывать после смены текстов."""
-        QTimer.singleShot(0, self._refit)
-
-    def _refit(self) -> None:
-        card = self.also_card
-        if card.width() > 0:
-            height = card.layout().totalHeightForWidth(card.width())
-            card.setMinimumHeight(height)
-            self.grid.setRowMinimumHeight(0, height)
+        pass  # карточка «Также под защитой» убрана: подгонять высоту больше нечего
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -236,27 +206,6 @@ class ProtectionPage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.refit()
-
-    @staticmethod
-    def _item(icon: str, title: str, text: str) -> tuple[QWidget, QLabel, QHBoxLayout]:
-        """Строка «значок — название — пояснение»: строка, пояснение (для обновления) и
-        её раскладка (чтобы добавить кнопку)."""
-        row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(10)
-        badge = _label(icon, "badge", wrap=False)
-        badge.setFixedSize(36, 36)
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet("background: rgba(127, 127, 127, 0.15);")
-        texts = QVBoxLayout()
-        texts.setSpacing(1)
-        detail = _label(text, "hint")
-        texts.addWidget(_label(title, "itemTitle"))
-        texts.addWidget(detail)
-        layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(texts, 1)
-        return row, detail, layout
 
     def set_running(self, running: bool) -> None:
         color = QColor(GOOD if running else BAD)
