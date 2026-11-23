@@ -26,13 +26,27 @@ def test_pages_load(app):
     ExclusionsPage()
 
 
-def test_auto_update_setting_under_password(app):
-    """«Автообновление в фоне» — в группе «Запуск», которая видна только после пароля."""
+def test_no_auto_install_setting_and_changelog_window(app):
+    """Настройки автообновления больше нет (обновление только по согласию); есть окно изменений."""
     from ui import settings as cfg
+    from ui.changelog_window import ChangelogWindow
     page = SettingsPage()
-    assert page.chk_auto_update is not None
-    assert cfg.DEFAULTS["update/auto_install"] is True   # автообновление включено по умолчанию
-    assert not page.chk_auto_update.isVisible()  # родитель groupStartup скрыт до пароля
+    assert "update/auto_install" not in cfg.DEFAULTS
+    assert not hasattr(page, "chk_auto_update")  # чекбокс «Автообновление в фоне» убран
+    win = ChangelogWindow("1.2.3", "## Изменено\n- пункт")
+    assert win is not None
+    assert win.btn_update.text() == "Обновить"
+    assert win.btn_later.text() == "Позже"
+
+
+def test_changelog_update_button_emits_consent(app):
+    """«Обновить» — единственный способ начать скачивание: по кнопке приходит сигнал согласия."""
+    from ui.changelog_window import ChangelogWindow
+    win = ChangelogWindow("1.2.3", "## x\n- y")
+    fired = []
+    win.update_requested.connect(lambda: fired.append(1))
+    win.btn_update.click()
+    assert fired == [1]
 
 
 def test_every_literal_settings_key_is_in_defaults():

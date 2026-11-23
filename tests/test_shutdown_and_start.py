@@ -122,11 +122,13 @@ def test_service_recover_vpn_uses_selfguard(svc, monkeypatch):
 
 
 def test_background_auto_update_wiring():
-    """Автообновление по умолчанию: уведомление, скачивание без вопроса, возврат в трей."""
+    """Обновление только по согласию: уведомление, окно изменений с «Обновить», возврат в трей."""
     gui = (Path(__file__).resolve().parent.parent / "gui.py").read_text(encoding="utf-8")
     assert "update/pending" in gui            # метка «было в трее» перед запуском установщика
     db = (Path(__file__).resolve().parent.parent / "mainwindow" / "databases.py").read_text(
         encoding="utf-8")
-    assert "update/auto_install" in db        # гейт автообновления
-    assert "Сейчас будет обновление" in db    # уведомление Windows перед установкой
-    assert "show_update_window" not in db     # ручного окна-вопроса больше нет
+    assert "update/auto_install" not in db    # настройки автообновления больше нет
+    assert "_show_changelog" in db            # окно со списком изменений (changelog с GitHub)
+    assert "update_requested" in db           # скачивание начинается только по кнопке «Обновить»
+    assert "run_installer" in db              # мастер Inno Setup (согласие спрашивает он)
+    assert "Доступна новая версия" in db      # уведомление о новой версии

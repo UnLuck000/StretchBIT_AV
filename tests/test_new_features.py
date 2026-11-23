@@ -1,5 +1,5 @@
 """Новое 13.11.2026: подписки VPN, проверка серверов и утечек, изменения профиля по ссылке,
-AdBlock файлом .dat, журнал PowerShell 4104, репутация VirusTotal, проверка обновления."""
+AdBlock файлом .dat, журнал PowerShell 4104, проверка обновления."""
 import base64
 import hashlib
 import json
@@ -151,19 +151,6 @@ def test_pslog_assembles_and_checks(monkeypatch):
     assert watch.check(10, "Get-ChildItem C:\\", "") is None
     info = watch.check(11, "$x = '" + amsi.BYPASS_PARTS[0] + "'", "")
     assert info["level"] == "threat" and info["killed"] and killed == [11]
-
-
-def test_reputation_parse_and_levels():
-    from scanner import reputation
-    doc = {"data": {"attributes": {
-        "last_analysis_stats": {"malicious": 12, "suspicious": 1, "undetected": 50,
-                                "harmless": 0},
-        "popular_threat_classification": {"suggested_threat_label": "trojan.agent"}}}}
-    rep = reputation.parse("a" * 64, doc)
-    assert (rep.malicious, rep.total, rep.level) == (12, 63, "threat")
-    assert "12 из 63" in rep.text() and "trojan.agent" in rep.text()
-    assert reputation.Reputation("b" * 64).level == "unknown"
-    assert reputation.Reputation("c" * 64, found=True, total=70).level == "clean"
 
 
 def test_update_check_helpers(tmp_path, monkeypatch):

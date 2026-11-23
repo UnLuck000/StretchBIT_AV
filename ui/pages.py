@@ -342,7 +342,6 @@ class SettingsPage(_UiPage):
         super().__init__()
         ui = self.ui
         self.chk_autostart = child(ui, QCheckBox, "chkAutostart")
-        self.chk_auto_update = child(ui, QCheckBox, "chkAutoUpdate")
         # «Запуск» и «Плановая проверка» — только после пароля, как «Проверка» и «Запреты»
         self.group_startup = child(ui, QGroupBox, "groupStartup")
         self.group_schedule = child(ui, QGroupBox, "groupSchedule")
@@ -423,7 +422,7 @@ class SettingsPage(_UiPage):
             self.lbl_support.setText(self.lbl_support.text() + " В тестовой версии в архив "
                                      "входят ещё комментарии со снимками экрана и статусы "
                                      "проверенных функций.")
-        self._all = (self.chk_autostart, self.chk_auto_update, self.chk_block_exit,
+        self._all = (self.chk_autostart, self.chk_block_exit,
                      self.chk_on_top, self.cmb_theme, self.spn_threshold,
                      self.spn_workers, self.spn_interval,
                      self.chk_decoys, self.cmb_scan_mode, self.chk_ecores,
@@ -436,7 +435,6 @@ class SettingsPage(_UiPage):
         guard_wheel(ui)  # колесо над полем прокручивает страницу, значение — после щелчка
 
         self.chk_autostart.toggled.connect(self._on_autostart)
-        self.chk_auto_update.toggled.connect(lambda v: self._save("update/auto_install", v))
         self.chk_block_exit.toggled.connect(lambda v: self._save("general/block_exit", v))
         self.chk_on_top.toggled.connect(lambda v: self._save("general/on_top", v))
         self.chk_decoys.toggled.connect(lambda v: self._save("protect/decoys", v))
@@ -533,7 +531,6 @@ class SettingsPage(_UiPage):
         for widget in self._all:
             widget.blockSignals(True)
         self.chk_autostart.setChecked(cfg.autostart_enabled())
-        self.chk_auto_update.setChecked(cfg.get("update/auto_install"))
         self.chk_block_exit.setChecked(cfg.get("general/block_exit"))
         self.chk_on_top.setChecked(cfg.get("general/on_top"))
         self.chk_decoys.setChecked(cfg.get("protect/decoys"))

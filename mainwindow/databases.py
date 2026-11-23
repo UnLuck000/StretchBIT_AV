@@ -116,15 +116,19 @@ class DatabasesMixin:
         if cfg.get("update/shown") == release.version:
             return  # эту версию уже обрабатывали — не докучать каждые 5 минут
         cfg.set_("update/shown", release.version)
-        if cfg.get("update/auto_install"):
-            self._auto_install(release)
+        if self.isHidden():  # в трее: уведомление, окно изменений — когда откроют программу
+            self._pending_changelog = release
+            self._notify_update(release)
+        else:               # окно открыто: сразу окно со списком изменений
+            self._show_changelog(release)
+        # скачивание и установка — только после согласия (кнопка «Обновить» в окне изменений)
 
-    def _auto_install(self, release):
-        """Автообновление: уведомить и в фоне скачать установщик, запустить его. Запоминаем,
-        было ли окно в трее, — после установки оно туда же и вернётся."""
-        self._notify_update(release)
+    def _download_and_install(self, release):
+        """Скачать установщик и запустить мастер Inno Setup (согласие на установку спрашивает
+        он) — вызывается только после нажатия «Обновить». Запоминаем, было ли окно в трее, —
+        после установки оно туда же и вернётся."""
         cfg.set_("update/pending", "1" if self.isHidden() else "0")
-        activity.record("update", f"Автообновление: {release.version}")
+        activity.record("update", f"Обновление: {release.version}")
 
         def job():
             import updatecheck
@@ -133,20 +137,36 @@ class DatabasesMixin:
                 updatecheck.run_installer(path)
             except Exception as e:  # noqa: BLE001 — попробуем ещё раз при следующей проверке
                 cfg.set_("update/shown", "")
-                activity.record("update", f"Автообновление не удалось: {e}")
+                activity.record("update", f"Обновление не удалось: {e}")
 
-        threading.Thread(target=job, daemon=True, name="release-auto-install").start()
+        threading.Thread(target=job, daemon=True, name="release-download").start()
+
+    def _show_changelog(self, release):
+        """Окно со списком изменений новой версии (changelog с GitHub). Скачивание и
+        установка начинаются только после нажатия «Обновить»."""
+        from ui.changelog_window import ChangelogWindow
+        win = getattr(self, "changelog_window", None)
+        if win is not None and win.isVisible():
+            win.close()
+        win = ChangelogWindow(release.version, release.notes, self)
+        win.update_requested.connect(lambda: self._download_and_install(release))
+        self.changelog_window = win
+        win.show()
+        win.raise_()
+        win.activateWindow()
 
     def _notify_update(self, release):
-        """Уведомление Windows «сейчас будет обновление» (без него — через значок в трее)."""
+        """Уведомление Windows о новой версии (без него — через значок в трее). Кнопка
+        «Подробнее» открывает окно со списком изменений."""
         shown = self.notifier.show(
             "Обновление StretchBIT",
-            f"Сейчас будет обновление StretchBIT {release.version}.",
-            [], lambda argument: None)
+            f"Доступна новая версия StretchBIT {release.version}.",
+            [("Подробнее", "open")],
+            lambda argument: self.show_main() if argument in ("open", "") else None)
         if not shown and self.tray is not None:
             self.tray.showMessage(
                 "Обновление StretchBIT",
-                f"Сейчас будет обновление StretchBIT {release.version}.",
+                f"Доступна новая версия StretchBIT {release.version}.",
                 QSystemTrayIcon.MessageIcon.Information, 12000)
 
     def auto_update_check(self):

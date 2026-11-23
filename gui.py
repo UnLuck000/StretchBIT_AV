@@ -419,6 +419,10 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
         self.activateWindow()
         if page:
             self.shell.show_page(page)
+        pending = getattr(self, "_pending_changelog", None)  # новая версия пришла, пока окно
+        if pending is not None:                              # было в трее: показать изменения
+            self._pending_changelog = None
+            self._show_changelog(pending)
 
     def quit_app(self, force: bool = False):
         """force: выход без проверки запрета (перезапуск от администратора, конец сеанса)."""
