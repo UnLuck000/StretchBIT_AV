@@ -99,6 +99,10 @@ MIRROR_BRANCH = "feeds"
 MIRROR_MAX_AGE = 3 * 86400      # старше — задание зеркала сломано: не берём, идём напрямую
 MIRROR_MAX_SIZE = 512 * 2**20   # распакованный файл зеркала — не больше (защита от gzip-бомбы)
 MIRROR_MANIFEST_VERSION = 1
+# Публичный ключ подписи манифеста баз (Ed25519, 64 hex-символа). Генерируется
+# tools/feeds_keygen.py; закрытый ключ — только в Secrets GitHub Actions (FEEDS_SIGN_KEY).
+# Пусто — подпись не проверяется (прежний режим до первой подписанной выгрузки).
+FEEDS_PUBLIC_KEY = ""
 
 
 # ---------- общее ----------
@@ -147,6 +151,24 @@ def reset_mirror() -> None:
     _manifest_cache.clear()
 
 
+def _verify_feeds_signature(data: dict) -> None:
+    """Подпись манифеста баз. Если публичный ключ задан — манифест обязан быть подписан им:
+    иначе его можно подменить через репозиторий/CI/ветку feeds. Без ключа — прежний режим."""
+    if not FEEDS_PUBLIC_KEY:
+        return
+    sig = data.get("signature")
+    if not isinstance(sig, str) or len(sig) != 128:
+        raise MirrorError("манифест баз не подписан")
+    try:
+        import ed25519
+        ok = ed25519.verify(bytes.fromhex(FEEDS_PUBLIC_KEY), ed25519.signable(data),
+                            bytes.fromhex(sig))
+    except (ValueError, ImportError):
+        ok = False
+    if not ok:
+        raise MirrorError("подпись манифеста баз не сошлась")
+
+
 def _mirror_manifest() -> dict:
     if "data" in _manifest_cache:
         return _manifest_cache["data"]
@@ -157,6 +179,7 @@ def _mirror_manifest() -> dict:
         if data.get("version") != MIRROR_MANIFEST_VERSION or not isinstance(
                 data.get("files"), dict):
             raise MirrorError("незнакомый manifest.json")
+        _verify_feeds_signature(data)
         age = time.time() - float(data.get("generated", 0))
         if age > MIRROR_MAX_AGE:
             raise MirrorError(f"зеркало не обновлялось {int(age // 86400)} дн.")

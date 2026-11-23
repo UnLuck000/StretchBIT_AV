@@ -59,12 +59,13 @@ def _write(records: list[dict]) -> None:
 
 
 def add(path: str, level: str, text: str, source: str = "", story: str = "",
-        pid: int = 0) -> str:
+        pid: int = 0, sid: str = "") -> str:
     """Находка (level: threat | suspicious). Возвращает id записи. story — сводка по
     процессу на момент находки (processmanager.story): процесс к просмотру журнала
-    обычно уже завершён."""
+    обычно уже завершён. sid — учётная запись, сообщившая находку (для фильтрации
+    между пользователями; находки защиты — без sid)."""
     if _remote is not None:
-        return _remote.add(path, level, text, source, story, pid)
+        return _remote.add(path, level, text, source, story, pid, sid)
     key = os.path.normcase(path) if path else text
     with _lock:
         records = _read()
@@ -78,6 +79,8 @@ def add(path: str, level: str, text: str, source: str = "", story: str = "",
         record = {"id": uuid.uuid4().hex, "time": _now(), "first": _now(), "count": 1,
                   "key": key, "path": path, "level": level, "text": text,
                   "source": source, "status": FOUND, "qid": ""}
+        if sid:
+            record["sid"] = sid
         if story:
             record["story"], record["pid"] = story, pid
         records.append(record)
@@ -98,17 +101,20 @@ def set_status(record_id: str, status: str, qid: str = "") -> None:
         _write(records)
 
 
-def merged(include_done: bool = False) -> list[dict]:
+def merged(include_done: bool = False, sid: str | None = None) -> list[dict]:
     """Записи журнала и файлы карантина, которых в нём нет; состояние карантина — по его
-    метаданным (файл могли восстановить или удалить из другого окна)."""
+    метаданным (файл могли восстановить или удалить из другого окна). sid — оставить только
+    записи этой учётной записи и записи без учётной записи (защита всей машины); None — все."""
     if _remote is not None:
-        return _remote.merged(include_done)
+        return _remote.merged(include_done, sid)
     from quarantine import STATUS_DELETED, STATUS_QUARANTINED, STATUS_RESTORED, list_quarantine
     q_status = {STATUS_QUARANTINED: QUARANTINED, STATUS_RESTORED: RESTORED,
                 STATUS_DELETED: DELETED}
     metas = {m["id"]: m for m in list_quarantine(include_history=True)}
     with _lock:
         records = _read()
+    if sid is not None:
+        records = [r for r in records if r.get("sid", "") in ("", sid)]
     linked = set()
     for r in records:
         meta = metas.get(r.get("qid") or "")
@@ -129,10 +135,10 @@ def merged(include_done: bool = False) -> list[dict]:
     return sorted(records, key=lambda r: r.get("time", ""), reverse=True)
 
 
-def get(record_id: str) -> dict | None:
+def get(record_id: str, sid: str | None = None) -> dict | None:
     if _remote is not None:
-        return _remote.get(record_id)
-    return next((r for r in merged(True) if r["id"] == record_id), None)
+        return _remote.get(record_id, sid)
+    return next((r for r in merged(True, sid=sid) if r["id"] == record_id), None)
 
 
 def mark_path(path: str, status: str, qid: str = "") -> None:

@@ -627,11 +627,13 @@ class ServiceCore:
     # --- журнал защиты ---
     def op_threats_list(self, client, args):
         from recovery import threatlog
-        return threatlog.merged(bool(args.get("include_done")))
+        # не администратор видит только свои записи и записи защиты всей машины (без sid)
+        return threatlog.merged(bool(args.get("include_done")),
+                                sid=None if client.elevated else client.sid)
 
     def op_threats_get(self, client, args):
         from recovery import threatlog
-        return threatlog.get(str(args["id"]))
+        return threatlog.get(str(args["id"]), sid=None if client.elevated else client.sid)
 
     def op_threats_add(self, client, args):
         from recovery import threatlog
@@ -641,7 +643,8 @@ class ServiceCore:
         return threatlog.add(str(args.get("path") or "")[:2048], level,
                              str(args.get("text") or "")[:2000],
                              str(args.get("source") or "")[:100],
-                             str(args.get("story") or "")[:65536], int(args.get("pid") or 0))
+                             str(args.get("story") or "")[:65536], int(args.get("pid") or 0),
+                             sid=client.sid or "")
 
     def op_threats_set_status(self, client, args):
         from recovery import threatlog

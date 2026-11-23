@@ -7,8 +7,10 @@ StretchBIT.exe этой установки; чужие отключаются с
 MAX_INSTANCES: молчащие подключения проверенного клиента держат только свои потоки.
 """
 import os
+import sys
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from service import protocol, winapi
 
@@ -206,10 +208,35 @@ class PipeServer:
             return protocol.fail(rid, str(e) or kind, kind)
 
 
+def _own_publisher() -> str:
+    """Издатель подписи нашей программы (собранная версия). '' — проверку подписи пропускаем
+    (запуск из исходников или программа не подписана)."""
+    if not getattr(sys, "frozen", False):
+        return ""
+    from scanner import signature
+    try:
+        info = signature.inspect_signature(Path(sys.executable))
+        return (info.publisher or "") if info.status == "valid" else ""
+    except Exception:  # noqa: BLE001 — не смогли прочитать подпись: без проверки
+        return ""
+
+
 def same_program(*images: str):
-    """Проверка клиента: путь образа совпадает с одним из images (без учёта регистра)."""
+    """Проверка клиента: путь образа совпадает с одним из images (без учёта регистра), а в
+    собранной программе — образ подписан тем же издателем, что и наша программа (иначе на том
+    же пути мог бы стоять чужой исполняемый файл)."""
     allowed = {os.path.normcase(os.path.abspath(i)) for i in images if i}
+    publisher = _own_publisher()
 
     def check(_pid: int, image: str) -> bool:
-        return bool(image) and os.path.normcase(os.path.abspath(image)) in allowed
+        if not image or os.path.normcase(os.path.abspath(image)) not in allowed:
+            return False
+        if publisher:
+            from scanner import signature
+            try:
+                theirs = signature.inspect_signature(Path(image))
+                return theirs.status == "valid" and (theirs.publisher or "") == publisher
+            except Exception:  # noqa: BLE001 — подпись не читается: не пускаем
+                return False
+        return True
     return check

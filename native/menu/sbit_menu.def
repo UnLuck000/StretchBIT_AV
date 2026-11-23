@@ -1,0 +1,4 @@
+LIBRARY sbit_menu
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow   PRIVATE

@@ -54,6 +54,23 @@ def test_threatlog_dedup_and_status(tmp_journal, tmp_path, monkeypatch):
     assert threatlog.merged(include_done=True)[0]["status"] == threatlog.DISMISSED
 
 
+def test_threatlog_filters_by_sid(tmp_journal, tmp_path, monkeypatch):
+    """Не администратор видит свои находки и находки защиты всей машины (без sid), но не чужие."""
+    import quarantine
+    monkeypatch.setattr(quarantine, "QUARANTINE_DIR", tmp_path / "q")
+    a = str(tmp_path / "a.exe")
+    b = str(tmp_path / "b.exe")
+    sysf = str(tmp_path / "sys.exe")
+    threatlog.add(a, "threat", "A", sid="S-1-5-21-A")
+    threatlog.add(b, "threat", "B", sid="S-1-5-21-B")
+    threatlog.add(sysf, "threat", "S")            # находка защиты — без sid
+    assert {r["path"] for r in threatlog.merged()} == {a, b, sysf}
+    assert {r["path"] for r in threatlog.merged(sid="S-1-5-21-A")} == {a, sysf}
+    b_id = next(r["id"] for r in threatlog.merged() if r["path"] == b)
+    assert threatlog.get(b_id, sid="S-1-5-21-A") is None      # чужое не отдаём
+    assert threatlog.get(b_id, sid=None) is not None          # администратор видит всё
+
+
 def test_file_exclusion_layers(tmp_path, monkeypatch, tmp_journal):
     from scanner import overrides
     monkeypatch.setattr(overrides, "OVERRIDES_FILE", tmp_path / "overrides.json")

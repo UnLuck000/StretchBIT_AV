@@ -5,6 +5,8 @@
 #
 # Настройка (один раз): Settings → Secrets and variables → Actions → New repository secret,
 # имя ABUSECH_AUTH_KEY, значение — ключ abuse.ch. Сменить ключ — поменять этот секрет.
+# Для подписи манифеста (updater.FEEDS_PUBLIC_KEY): секрет FEEDS_SIGN_KEY — закрытый ключ
+# Ed25519 из tools/feeds_keygen.py; публичный вшить в updater.py.
 # Запустить вручную: Actions → «Зеркало баз» → Run workflow.
 # Ветка «feeds» каждый раз записывается заново одним коммитом (история не копится).
 name: Зеркало баз
@@ -28,7 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: tools/feeds_mirror.py
+          sparse-checkout: |
+            tools/feeds_mirror.py
+            ed25519.py
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-python@v5
@@ -59,6 +63,7 @@ jobs:
       - name: Скачать источники
         env:
           ABUSECH_AUTH_KEY: ${{ secrets.ABUSECH_AUTH_KEY }}
+          FEEDS_SIGN_KEY: ${{ secrets.FEEDS_SIGN_KEY }}
         run: python tools/feeds_mirror.py out prev
 
       # до 14.11.2026 (вечер) зеркало было выпуском «feeds»: выпуск и метка с тем же именем, что у

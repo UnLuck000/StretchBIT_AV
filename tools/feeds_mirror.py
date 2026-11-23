@@ -23,6 +23,13 @@ import time
 import urllib.request
 from pathlib import Path
 
+# подпись манифеста (Ed25519) — модуль из корня репозитория; без него подпись пропускается
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    import ed25519
+except ImportError:  # отдельная копия скрипта без модулей проекта
+    ed25519 = None
+
 MANIFEST_VERSION = 1
 MB_RECENT = "https://mb-api.abuse.ch/v2/files/exports/{key}/recent.csv"
 THREATFOX_API = "https://threatfox-api.abuse.ch/api/v1/"
@@ -123,6 +130,13 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
                                    "size": len(raw)}
     sums = "".join(f"{v['sha256']}  {v['name']}\n" for v in manifest["files"].values())
     (out / "SHA256SUMS").write_text(sums, encoding="utf-8")
+    sign_key = os.environ.get("FEEDS_SIGN_KEY", "").strip()
+    if sign_key:
+        try:
+            manifest["signature"] = ed25519.sign(bytes.fromhex(sign_key),
+                                                 ed25519.signable(manifest)).hex()
+        except (ValueError, AttributeError, ImportError) as e:
+            manifest["errors"]["sign"] = type(e).__name__
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1),
                                        encoding="utf-8")
     return manifest

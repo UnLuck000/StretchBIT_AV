@@ -113,14 +113,16 @@ class Remote:
         return bool(self.client.call("quarantine.delete", id=item_id))
 
     # ---------- журнал защиты ----------
-    def add(self, path, level, text, source="", story="", pid=0) -> str:
+    def add(self, path, level, text, source="", story="", pid=0, sid="") -> str:
+        # sid не передаём: служба знает учётную запись клиента по каналу
         return self.client.call("threats.add", path=str(path or ""), level=level, text=text,
                                 source=source, story=story, pid=int(pid or 0))
 
     def set_status(self, record_id, status, qid="") -> None:
         self.client.call("threats.set_status", id=record_id, status=status, qid=qid)
 
-    def merged(self, include_done: bool = False) -> list[dict]:
+    def merged(self, include_done: bool = False, sid: str | None = None) -> list[dict]:
+        # sid не передаём: служба фильтрует по учётной записи клиента сама
         try:
             return self.client.call("threats.list", include_done=include_done)
         except ServiceError:
@@ -128,7 +130,8 @@ class Remote:
             swallowed("служба: журнал защиты")
             return []
 
-    def get(self, record_id):
+    def get(self, record_id, sid: str | None = None):
+        # sid не передаём: служба фильтрует по учётной записи клиента сама
         return self.client.call("threats.get", id=record_id)
 
     def mark_path(self, path, status, qid="") -> None:

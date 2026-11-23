@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sparse-пакет: только «удостоверение» + регистрация COM-сервера IExplorerCommand, чтобы
+пункт «Проверить в StretchBIT» попал в НОВОЕ контекстное меню Windows 11 (а не в «Показать
+больше параметров»). Сама программа ставится обычным установщиком (не пакетом).
+
+Подпись: сертификат подписывает makeappx/signtool (см. native/menu/build.py). Идентификатор
+Publisher должен совпадать с субъектом сертификата (CN=...). -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows4"
+         xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows5"
+         IgnorableNamespaces="desktop4 desktop5">
+  <Identity Name="StretchBIT.SBIT" ProcessorArchitecture="x64"
+            Version="1.0.0.0" Publisher="CN=StretchBIT" />
+  <Properties>
+    <DisplayName>StretchBIT</DisplayName>
+    <PublisherDisplayName>StretchBIT</PublisherDisplayName>
+    <Logo>Assets\icon.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="ru-ru" />
+  </Resources>
+  <Applications>
+    <Application Id="SBIT" Executable="StretchBIT.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="StretchBIT" Description="StretchBIT"
+                          Square150x150Logo="Assets\icon.png"
+                          Square44x44Logo="Assets\icon.png" BackgroundColor="transparent" />
+      <Extensions>
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb Id="CheckWithSBIT" Clsid="{7f3d2c1a-9b4e-4d6f-a831-c25d7e0f1a9b}" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="StretchBIT menu"
+                                 AppId="{7f3d2c1a-9b4e-4d6f-a831-c25d7e0f1a9b}">
+              <com:Class Id="{7f3d2c1a-9b4e-4d6f-a831-c25d7e0f1a9b}"
+                         Path="sbit_menu.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

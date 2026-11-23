@@ -305,6 +305,29 @@ def test_server_refuses_foreign_client(core):
     assert core.server.rejected >= 1
 
 
+def test_same_program_checks_signature(monkeypatch, tmp_path):
+    """Собранная программа: путь совпал, но подпись чужого издателя — клиент не пускается."""
+    from scanner import signature
+    from service import pipeserver
+    app = str(tmp_path / "app.exe")
+    monkeypatch.setattr(pipeserver, "_own_publisher", lambda: "StretchBIT")
+    state = {"publisher": "StretchBIT"}
+
+    class _Sig:
+        status = "valid"
+
+        @property
+        def publisher(self):
+            return state["publisher"]
+
+    monkeypatch.setattr(signature, "inspect_signature", lambda p: _Sig())
+    check = pipeserver.same_program(app)
+    assert check(123, app) is True
+    assert check(123, str(tmp_path / "other.exe")) is False     # путь не тот
+    state["publisher"] = "Evil"
+    assert check(123, app) is False                              # чужой издатель
+
+
 @windows
 def test_event_pump_delivers(pipe):
     from service.client import EventPump, ServiceClient, dev_server_check

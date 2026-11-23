@@ -167,6 +167,24 @@ def test_gunzip_limit():
     assert updater._gunzip(gzip.compress(b"ok")) == b"ok"
 
 
+def test_feeds_signature_roundtrip(tmp_path, monkeypatch):
+    """Манифест подписывается (закрытый ключ в Secrets) и проверяется публичным ключом."""
+    import ed25519
+    secret = bytes(range(32))
+    public = ed25519.public_key(secret)
+    monkeypatch.setattr(updater, "FEEDS_PUBLIC_KEY", public.hex())
+    monkeypatch.setenv("FEEDS_SIGN_KEY", secret.hex())
+    manifest = feeds_mirror.build(tmp_path, KEY, fake_sources())
+    assert "signature" in manifest
+    data = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    updater._verify_feeds_signature(data)          # подпись верна — не поднимает
+    data["files"]["malwarebazaar"]["sha256"] = "0" * 64  # подменили
+    with pytest.raises(updater.MirrorError, match="подпись"):
+        updater._verify_feeds_signature(data)
+    with pytest.raises(updater.MirrorError, match="не подписан"):  # ключ задан, подписи нет
+        updater._verify_feeds_signature({"version": 1, "files": {}})
+
+
 def test_workflow_uses_secret_and_branch():
     text = (ROOT / ".github" / "workflows" / "feeds-mirror.yml").read_text(encoding="utf-8")
     assert "secrets.ABUSECH_AUTH_KEY" in text and "tools/feeds_mirror.py out" in text
