@@ -54,9 +54,6 @@ user_reports/
 # провайдер AMSI собирается native/amsi/build.py
 native/amsi/bin/
 
-# пункт контекстного меню Windows 11 (IExplorerCommand) — native/menu/build.py
-native/menu/bin/
-
 # WinDivert (официальный выпуск) — кладётся в сборку build_release.copy_windivert
 native/windivert/*.dll
 native/windivert/*.sys

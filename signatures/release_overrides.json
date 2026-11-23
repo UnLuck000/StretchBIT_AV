@@ -37,6 +37,78 @@
     }
   },
   "files": {
+    "0a5af68c19937fe029462b8f63705caa7f58e0927cd4dac2fce520c94b3510f9": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-macos\\System.Web.dll"
+    },
+    "0cedd4fed90f86d5d917c6126637e4ba09d3802fb4010fae1e97505eb62cef50": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.0-api\\System.Web.dll"
+    },
+    "0e9bebb118e355b1dcbd7807404e2273117960ba445e6a444a5a95528e7cb033": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-linux\\System.Web.Extensions.dll"
+    },
+    "13107549e51f63a3718e731c1e5d7a40208e5ec1477ade5317f49c2eccabbda2": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityaot-linux\\System.Web.dll"
+    },
+    "156137b8311eb5daaff95069b8c54e115f649854d15acfaa9d74826447c3fe74": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-win32\\System.Web.dll"
+    },
+    "17f16c6bf4a22dd43ef799c40ee92c0a430f9c1e5c1213c888983f431db5e425": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.5\\System.Web.Extensions.dll"
+    },
+    "1e5cc593ea01256c59fac6c08b5af2ea917c519f1d2c738de36ab50fbb02d7ef": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-macos\\System.Web.Extensions.dll"
+    },
+    "21447a79fecc9dee4c55ec77caeec17ef62d222480fa8065d7c51bf29f10180d": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.6.1-api\\System.Web.dll"
+    },
     "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f": {
       "added_at": "2026-11-08T21:19:59",
       "layers": [
@@ -54,6 +126,42 @@
       ],
       "note": "",
       "path": "C:\\WINDOWS\\assembly\\NativeImages_v2.0.50727_32\\System.Web\\d88548af6dcc90ecdf1323d460e94100\\System.Web.ni.dll"
+    },
+    "4f3504c4bffb650b3cbda0b50420ace694a8cb453f1cdd56ee069cfc3526318a": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-linux\\System.Web.dll"
+    },
+    "57d306019a879fc37daa6da9ec6fb6df7332d8490c7f24a7a14c7bf10c9aebb3": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.6-api\\System.Web.dll"
+    },
+    "5e9bad2a9cce240ab1844ff97193ba451e1a5e339d49c5f5edb7254eaf67bcbd": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.6.2-api\\System.Web.dll"
+    },
+    "6333a0fe73886f3e25a6069166fd9ad955768820a486ac8a5858398885b78ea2": {
+      "added_at": "2026-11-23T21:32:24",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.5.2-api\\System.Web.dll"
     },
     "6c9b3dd142a09dc468e23ad39aad6f75a0f2b85125104469f026e52a474e464f": {
       "added_at": "2026-11-08T21:19:59",
@@ -73,6 +181,15 @@
       "note": "",
       "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Rust.url"
     },
+    "71eb13356fac9e56e028675f715f849296a16a73605a1a0016fd068d115b5cd3": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\gac\\System.Web\\4.0.0.0__b03f5f7f11d50a3a\\System.Web.dll"
+    },
     "79be63f17a7b5aec4d6ea5ba987047bb9781096e9e3031d6d911587f05398d22": {
       "added_at": "2026-11-08T23:51:18",
       "layers": [
@@ -80,6 +197,15 @@
       ],
       "note": "",
       "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Русы не против Ящерок.url"
+    },
+    "85b82ea5215471276157f9b310300fc6c6a4fdc6820e68551ac176014df80e42": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.5-api\\System.Web.dll"
     },
     "979234fa74a5408072150b20e10f89da29864db5b32e47962c5024b03fd7833c": {
       "added_at": "2026-11-08T21:19:59",
@@ -90,6 +216,33 @@
       "note": "",
       "path": "C:\\WINDOWS\\assembly\\NativeImages_v4.0.30319_32\\System.Web\\b1d38135c6fcfb3571da5383bed1442c\\System.Web.ni.dll"
     },
+    "a68d4ff594fd3898b352be1a65bd1c3b94843daf05b2e41906a6e4fc4faf8a53": {
+      "added_at": "2026-11-23T21:32:42",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "%TEMP%\\sbit-time\\test_launcher_shortcut_is_not_0\\Odd.url"
+    },
+    "ad006ccfe69fe9febb5ffb01cda1aaf53116df50de7884cd6330983e4e235e4e": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.5.1-api\\System.Web.dll"
+    },
+    "add8100683a871220ae21d196dc9077320e6febd7f1954f1703ecc8a5b6d5e24": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.8-api\\System.Web.dll"
+    },
     "afe5a5c026d66b9453a7548215a74aae83abfd00903f8168eb0fc644e0d19d4d": {
       "added_at": "2026-11-08T21:19:59",
       "layers": [
@@ -98,6 +251,24 @@
       ],
       "note": "",
       "path": "C:\\WINDOWS\\assembly\\NativeImages_v4.0.30319_64\\System.Web\\d8062fc067157b799111da0a85c6210e\\System.Web.ni.dll"
+    },
+    "b31a819be8ebe507d3c18d4f8aa8202c0edef8db4e1accad1d584b751aef9cf5": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.7-api\\System.Web.dll"
+    },
+    "c03d288b516f8c89e95effba2646dd60acd4e0cba98ec74be5f33cf82d4c77e3": {
+      "added_at": "2026-11-23T21:32:42",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\JetBrains\\PyCharm 2026.2.2\\plugins\\python-ce\\lib\\modules\\intellij.python.community.impl.jar"
     },
     "c3526bd0f27d364b787ab32e271570a972102c20723c014cd668541b019c11d7": {
       "added_at": "2026-11-08T21:19:59",
@@ -117,6 +288,15 @@
       "note": "",
       "path": "C:\\WINDOWS\\assembly\\NativeImages_v4.0.30319_32\\System.Web\\3d83873d913b153ee37d86bad174c6ff\\System.Web.ni.dll"
     },
+    "ccb01f123088ee93a98f73277fa7b8a88a27bd2113f1b9c890f08d80c824520b": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-linux\\System.Web.Extensions.dll"
+    },
     "cf0704039c532170356ef4d98ff8b55357c5f9ef557f5c52b1ba491175ea479c": {
       "added_at": "2026-11-08T21:19:59",
       "layers": [
@@ -125,6 +305,15 @@
       ],
       "note": "",
       "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Tricky Towers.url"
+    },
+    "cfbe151c9d78bb821252b28da53f45e5741666b773ea1c396dff86342493559b": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.7.2-api\\System.Web.dll"
     },
     "cfcf32f5662791f1f22a77acb6dddfbc970fe6e99506969b3ea67c03f67687ab": {
       "added_at": "2026-11-08T21:20:25",
@@ -161,6 +350,69 @@
       "note": "",
       "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Soundpad.url"
     },
+    "e8f8b1e3154fd602705ccc5a6e9dc8518d2d8de9c5a22d2ce07ea02bf50cf6f6": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-linux\\System.Web.dll"
+    },
+    "ebdb15f7bd20918eb93556fbb459ad4ac5268b192bb04f8f90296fa0631eecad": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-macos\\System.Web.dll"
+    },
+    "ee31a5ce19efc5925258a1e0e5c692a035ff171780ef7d25f623b78ceaf4eb20": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-win32\\System.Web.Extensions.dll"
+    },
+    "efae4955c17928092d85fe58431765e48056b9cddf68259af261ef6e35610826": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-macos\\System.Web.Extensions.dll"
+    },
+    "f2d8a1cc38da5f5923f8b858f484c86e8410945188834844c8c4f1da764e96e4": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\4.7.1-api\\System.Web.dll"
+    },
+    "f5d437d5df442903e93f17bb5cef5f73d08ecab8f88778c0521db0f865c630ea": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\net_4_x-win32\\System.Web.Extensions.dll"
+    },
+    "f5e76d271e8fd71ae7cda43ab2200bedd9b8751664dcb51e3640efb19be5b262": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityaot-win32\\System.Web.dll"
+    },
     "f625cd3e2dc9a0e2b8f166d4b000ca71c972c670ac989eae3925d7c6a8079738": {
       "added_at": "2026-11-08T21:42:43",
       "layers": [
@@ -169,6 +421,33 @@
       ],
       "note": "",
       "path": "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Human Fall Flat.url"
+    },
+    "f91c98e4b252c6385834e02dc452e6bcc667e48c0e2831cb4beb745a839e1d76": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityaot-macos\\System.Web.dll"
+    },
+    "f9a3c4c7a1283e8de34e85838b70781a56e9c876e800d2f9a2733f315867ab46": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\unityjit-win32\\System.Web.dll"
+    },
+    "fdf2adafae9c1368f0b3974b68f38a3b3ffcca2c6005807c621ff18a07a9cd39": {
+      "added_at": "2026-11-23T21:32:58",
+      "layers": [
+        "hash",
+        "yara"
+      ],
+      "note": "",
+      "path": "C:\\Program Files\\Unity\\Hub\\Editor\\6000.5.2f1\\Editor\\Data\\MonoBleedingEdge\\lib\\mono\\2.0-api\\System.Web.dll"
     }
   },
   "hashes": {
