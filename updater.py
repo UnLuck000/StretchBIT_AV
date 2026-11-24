@@ -101,7 +101,7 @@ MIRROR_MAX_SIZE = 512 * 2**20   # распакованный файл зерка
 MIRROR_MANIFEST_VERSION = 1
 # Публичный ключ подписи манифеста баз (Ed25519, 64 hex-символа). Генерируется
 # tools/feeds_keygen.py; закрытый ключ — только в Secrets GitHub Actions (FEEDS_SIGN_KEY).
-# Пусто — подпись не проверяется (прежний режим до первой подписанной выгрузки).
+# Пусто — зеркало недоступно; прямые источники остаются доступны. Перед выпуском задать ключ.
 FEEDS_PUBLIC_KEY = ""
 
 
@@ -153,9 +153,9 @@ def reset_mirror() -> None:
 
 def _verify_feeds_signature(data: dict) -> None:
     """Подпись манифеста баз. Если публичный ключ задан — манифест обязан быть подписан им:
-    иначе его можно подменить через репозиторий/CI/ветку feeds. Без ключа — прежний режим."""
+    Без закреплённого ключа зеркало не принимается, TOFU и unsigned fallback нет."""
     if not FEEDS_PUBLIC_KEY:
-        return
+        raise MirrorError("не настроен публичный ключ подписи баз (FEEDS_PUBLIC_KEY)")
     sig = data.get("signature")
     if not isinstance(sig, str) or len(sig) != 128:
         raise MirrorError("манифест баз не подписан")
@@ -181,6 +181,8 @@ def _mirror_manifest() -> dict:
             raise MirrorError("незнакомый manifest.json")
         _verify_feeds_signature(data)
         age = time.time() - float(data.get("generated", 0))
+        if age < -300:
+            raise MirrorError("время манифеста баз находится в будущем")
         if age > MIRROR_MAX_AGE:
             raise MirrorError(f"зеркало не обновлялось {int(age // 86400)} дн.")
     except MirrorError as e:
@@ -210,7 +212,7 @@ def mirror_file(kind: str) -> bytes:
     if not entry:
         raise MirrorError("в зеркале нет (задание зеркала не скачало)")
     name = str(entry.get("name", ""))
-    if not re.fullmatch(r"[a-z0-9_-]+-\d{12}\.[a-z]+\.gz", name):
+    if not re.fullmatch(r"[a-z0-9_-]+-\d{12}\.[a-z0-9]+\.gz", name):
         raise MirrorError("странное имя файла в manifest.json")
     packed = _download(mirror_base() + name, timeout=DOWNLOAD_TIMEOUT)
     if hashlib.sha256(packed).hexdigest() != str(entry.get("sha256", "")).lower():
@@ -488,9 +490,13 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
         try:
             data = md5_bin(_download(VIRUSSHARE_URL.format(n=n), timeout=DOWNLOAD_TIMEOUT))
         except Exception as e:
-            failed += 1
-            print(f"VirusShare {n:05d}: {_error(e)}")
-            continue
+            print(f"VirusShare {n:05d}: {_error(e)}, пробую зеркало")
+            try:
+                data = md5_bin(mirror_file(f"virusshare_{n:05d}"))
+            except Exception as fallback_error:
+                failed += 1
+                print(f"VirusShare {n:05d}: зеркало: {_error(fallback_error)}")
+                continue
         _write_atomic(FEEDS_DIR / f"virusshare_{n:05d}.md5.bin", data)
         loaded += 1
     for n in have - set(wanted):  # вышедшие за окно старые списки
@@ -505,7 +511,8 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
     else:
         print(f"VirusShare: списков скачано {loaded}"
               + (f", с ошибкой {failed}" if failed else "") + f", MD5 всего {total}")
-    return failed < len(missing) or not missing
+    present = {n for n in wanted if (FEEDS_DIR / f"virusshare_{n:05d}.md5.bin").exists()}
+    return True if len(present) == len(wanted) else ("partial" if loaded else False)
 
 
 def _virusshare_from_mirror(files: int, progress, part) -> bool:
@@ -527,7 +534,7 @@ def _virusshare_from_mirror(files: int, progress, part) -> bool:
     FEEDS_DIR.mkdir(parents=True, exist_ok=True)
     have = {int(m.group(1)) for p in FEEDS_DIR.glob("virusshare_*.md5.bin")
             if (m := re.match(r"virusshare_(\d+)\.md5\.bin$", p.name))}
-    missing = [n for n in wanted if n not in have and n in lists]
+    missing = [n for n in wanted if n not in have]
     loaded, failed = 0, 0
     for i, n in enumerate(missing, 1):
         if progress:
@@ -535,6 +542,8 @@ def _virusshare_from_mirror(files: int, progress, part) -> bool:
         if part:
             part((i - 1) / len(missing))
         try:
+            if n not in lists:
+                raise MirrorError("в зеркале отсутствует ожидаемый список")
             raw = mirror_file(lists[n])
             data = md5_bin(raw)
         except Exception as e:
@@ -547,7 +556,7 @@ def _virusshare_from_mirror(files: int, progress, part) -> bool:
     total = sum(p.stat().st_size // 16 for p in FEEDS_DIR.glob("virusshare_*.md5.bin"))
     print(f"VirusShare (зеркало): списков скачано {loaded}"
           + (f", с ошибкой {failed}" if failed else "") + f", MD5 всего {total}")
-    return failed < len(missing) or not missing
+    return True if not failed else ("partial" if loaded else False)
 
 
 # ---------- правила YARA ----------
@@ -806,7 +815,7 @@ def update_all(progress=None, fraction=None):
             step_ok = False
             print(f"{title}: ошибка {_error(e)}")
         ok = step_ok or ok
-        failed = failed or not step_ok
+        failed = failed or step_ok is not True
         done[0] += weight
         if fraction:
             fraction(done[0] / total)

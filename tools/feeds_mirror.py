@@ -23,14 +23,12 @@ import time
 import urllib.request
 from pathlib import Path
 
-# подпись манифеста (Ed25519) — модуль из корня репозитория; без него подпись пропускается
+# подпись обязательна; модуль из корня репозитория
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-try:
-    import ed25519
-except ImportError:  # отдельная копия скрипта без модулей проекта
-    ed25519 = None
+import ed25519  # noqa: E402
 
 MANIFEST_VERSION = 1
+MAX_DOWNLOAD = 512 * 2**20
 MB_RECENT = "https://mb-api.abuse.ch/v2/files/exports/{key}/recent.csv"
 THREATFOX_API = "https://threatfox-api.abuse.ch/api/v1/"
 THREATFOX_DAYS = 7
@@ -46,7 +44,10 @@ def _download(url: str, data: bytes | None = None, headers: dict | None = None,
                                  headers={"User-Agent": "StretchBIT-feeds-mirror/1.0",
                                           **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        raw = resp.read(MAX_DOWNLOAD + 1)
+        if len(raw) > MAX_DOWNLOAD:
+            raise ValueError("ответ источника больше допустимого")
+        return raw
 
 
 def _expect(marker: str):
@@ -93,6 +94,21 @@ VIRUSSHARE_FIRST_GUESS = 505
 VIRUSSHARE_PROBES = 12      # HEAD-запросов на поиск последнего номера
 VIRUSSHARE_SPAN = 64        # дальше этого от подсказки номер не ищем
 VIRUSSHARE_TIMEOUT = 120    # с: virusshare.com медленный
+
+
+def _previous_file(previous: Path | None, info: dict) -> bytes | None:
+    """Прежний файл только с безопасным именем и совпавшим хэшем доверенного manifest."""
+    name = str(info.get("name", ""))
+    if previous is None or not re.fullmatch(r"[a-z0-9_-]+-\d{12}\.[a-z0-9]+\.gz", name):
+        return None
+    path = previous / name
+    try:
+        if path.is_symlink() or path.stat().st_size > MAX_DOWNLOAD:
+            return None
+        packed = path.read_bytes()
+    except OSError:
+        return None
+    return packed if hashlib.sha256(packed).hexdigest() == info.get("sha256") else None
 
 
 def _virusshare_exists(n: int) -> bool:
@@ -157,19 +173,19 @@ def _mirror_virusshare(out: Path, previous: Path | None, prev_files: dict, stamp
         if not m:
             continue
         name = str(info.get("name", ""))
-        src = previous / name if previous is not None and name else None
-        if src is not None and src.exists():
-            (out / name).write_bytes(src.read_bytes())
+        packed = _previous_file(previous, info)
+        if packed is not None:
+            (out / name).write_bytes(packed)
             prev[int(m.group(1))] = info
     hint = max(prev) if prev else VIRUSSHARE_FIRST_GUESS
     try:
         last = _virusshare_last(hint)
     except Exception as e:  # noqa: BLE001 — сайт может быть недоступен
         errors["virusshare"] = type(e).__name__
-        return result
+        return {f"virusshare_{n:05d}": info for n, info in prev.items()}
     if last is None:
         errors["virusshare"] = "последний список не найден"
-        return result
+        return {f"virusshare_{n:05d}": info for n, info in prev.items()}
     for n in range(last, max(-1, last - VIRUSSHARE_FILES), -1):
         key = f"virusshare_{n:05d}"
         if n in prev:
@@ -194,6 +210,11 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
     (только тип ошибки: в адресе MalwareBazaar и URLhaus ключ). Если источник не скачался, а
     в папке previous есть его прежний файл - он остаётся (устаревший лучше, чем ничего)."""
     sources = SOURCES if sources is None else sources
+    sign_key = os.environ.get("FEEDS_SIGN_KEY", "").strip()
+    if not sign_key:
+        raise ValueError("не настроен FEEDS_SIGN_KEY: неподписанные базы не публикуются")
+    secret = bytes.fromhex(sign_key)
+    public = ed25519.public_key(secret)  # проверяет длину до скачивания и записи
     now = time.time() if now is None else now
     stamp = time.strftime("%Y%m%d%H%M", time.gmtime(now))
     out.mkdir(parents=True, exist_ok=True)
@@ -201,7 +222,11 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
     if previous is not None:
         try:
             prev_manifest = json.loads((previous / "manifest.json").read_text(encoding="utf-8"))
-            prev_files = prev_manifest.get("files", {}) if isinstance(prev_manifest, dict) else {}
+            if not isinstance(prev_manifest, dict):
+                raise ValueError("неверный прежний манифест")
+            signature = bytes.fromhex(prev_manifest.get("signature", ""))
+            if ed25519.verify(public, ed25519.signable(prev_manifest), signature):
+                prev_files = prev_manifest.get("files", {})
         except (OSError, ValueError):
             prev_files = {}
     manifest = {"version": MANIFEST_VERSION, "generated": int(now), "files": {}, "errors": {}}
@@ -215,9 +240,9 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
         except Exception as e:  # noqa: BLE001 — любой сбой источника: пробуем прежний файл
             prev = prev_files.get(kind) or {}
             prev_name = str(prev.get("name", ""))
-            prev_path = previous / prev_name if previous is not None and prev_name else None
-            if prev_path is not None and prev_path.exists():
-                (out / prev_name).write_bytes(prev_path.read_bytes())
+            packed = _previous_file(previous, prev)
+            if packed is not None:
+                (out / prev_name).write_bytes(packed)
                 manifest["files"][kind] = dict(prev)
                 manifest["errors"][kind] = f"{type(e).__name__} (взят прежний)"
             else:
@@ -235,13 +260,7 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
                                                 manifest["errors"]))
     sums = "".join(f"{v['sha256']}  {v['name']}\n" for v in manifest["files"].values())
     (out / "SHA256SUMS").write_text(sums, encoding="utf-8")
-    sign_key = os.environ.get("FEEDS_SIGN_KEY", "").strip()
-    if sign_key:
-        try:
-            manifest["signature"] = ed25519.sign(bytes.fromhex(sign_key),
-                                                 ed25519.signable(manifest)).hex()
-        except (ValueError, AttributeError, ImportError) as e:
-            manifest["errors"]["sign"] = type(e).__name__
+    manifest["signature"] = ed25519.sign(secret, ed25519.signable(manifest)).hex()
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1),
                                        encoding="utf-8")
     return manifest

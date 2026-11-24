@@ -384,10 +384,20 @@ class LaunchGuard:
                     # экстренное завершение уровня «угроза» (хэш или правило вредоноса у
                     # неподписанного файла): процесс и его потомки завершаются, файл — в
                     # карантин (кроме системных из папки Windows)
-                    killed = _kill_tree(pid)
+                    reason = verdicts.get(target)
+                    from scanner.engine import automatic_action, confirm_automatic
+                    if not automatic_action(reason):
+                        continue
+                    def stop_process():
+                        nonlocal killed
+                        killed = _kill_tree(pid)
+                    quarantined = _quarantine_threat(
+                        target, reason, before_delete=stop_process,
+                        verify=lambda fin, target=target: confirm_automatic(
+                            Path(target), fin, *self._bases))
                     self.blocked += killed
-                    quarantined = _quarantine_threat(target, text)
-                    self._emit("blocked", {"pid": pid, "name": name, "exe": target,
+                    self._emit("blocked" if killed or quarantined else "threat",
+                               {"pid": pid, "name": name, "exe": target,
                                            "text": text, "killed": killed,
                                            "quarantined": quarantined,
                                            "parent": parent})
@@ -488,14 +498,18 @@ def _kill_tree(pid: int) -> bool:
         return False
 
 
-def _quarantine_threat(path: str, reason: str) -> bool:
+def _quarantine_threat(path: str, reason: str, before_delete=None, verify=None) -> bool:
     """Файл угрозы — в карантин (автокарантин уровня «угроза»). Системные файлы из папки
     Windows не трогаем. False — не удалось (файл занят, нет прав, системный)."""
     if os.path.normcase(path).startswith(windows_dir()):
         return False
     try:
         from quarantine import quarantine_file
-        quarantine_file(Path(path), reason=reason)
+        digest = getattr(reason, "sha256", "")
+        if not digest:
+            return False
+        quarantine_file(Path(path), reason=reason, expected_sha256=digest,
+                        before_delete=before_delete, verify=verify)
         return True
     except Exception:
         return False

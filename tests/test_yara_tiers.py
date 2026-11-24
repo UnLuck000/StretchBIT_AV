@@ -69,10 +69,11 @@ def _analyze_partner(monkeypatch, tmp_path, matches, heuristic_score=0):
     return engine.analyze(tmp_path / "a.dll", rules=object(), threshold=60, revocation=False)
 
 
-def test_confirm_raises_heuristic_to_threat(confirm_list, monkeypatch, tmp_path):
+def test_confirm_with_heuristic_remains_check(confirm_list, monkeypatch, tmp_path):
     reason = _analyze(monkeypatch, tmp_path, [Match("Impacket")], heuristic_score=80)
-    assert reason.startswith("YARA: Impacket (подтверждено эвристикой")
-    assert engine.reason_level(reason) == "threat"
+    assert reason.startswith(engine.CHECK_PREFIX + "Impacket (совпало с эвристикой")
+    assert engine.reason_level(reason) == "suspicious"
+    assert not engine.automatic_action(reason)
 
 
 def test_weak_alone_is_suspicious(confirm_list, monkeypatch, tmp_path):
@@ -85,7 +86,8 @@ def test_weak_alone_is_suspicious(confirm_list, monkeypatch, tmp_path):
 def test_weak_confirmed_and_strong_are_threats(confirm_list, monkeypatch, tmp_path):
     reason = _analyze(monkeypatch, tmp_path, [Match("LaZagne", meta={"category": "TOOL"}),
                                               Match("Impacket")])
-    assert reason == "YARA: LaZagne (подтверждают: Impacket)"
+    assert reason == engine.WEAK_PREFIX + "LaZagne (подтверждают: Impacket)"
+    assert not engine.automatic_action(reason)
     reason = _analyze(monkeypatch, tmp_path, [Match("AgentTesla")])
     assert reason == "YARA: AgentTesla" and engine.reason_level(reason) == "threat"
     # исключение программы из слоя yara действует и на «слабую» причину

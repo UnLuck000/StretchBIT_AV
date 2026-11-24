@@ -33,6 +33,10 @@ def _virusshare_offline(monkeypatch):
     """VirusShare в тестах не трогает сеть: пробу последнего номера глушим (None — сайт не
     отвечает). Отдельный тест ниже проверяет само зеркалирование с подменой загрузки."""
     monkeypatch.setattr(feeds_mirror, "_virusshare_last", lambda hint: None)
+    import ed25519
+    secret = bytes(range(32))  # только тестовый ключ, не используется в выпуске
+    monkeypatch.setenv("FEEDS_SIGN_KEY", secret.hex())
+    monkeypatch.setattr(updater, "FEEDS_PUBLIC_KEY", ed25519.public_key(secret).hex())
 
 
 def fake_sources(fail=()):
@@ -108,6 +112,53 @@ def test_mirror_virusshare_lists(tmp_path, monkeypatch):
     assert gzip.decompress(packed) == raw
 
 
+def test_mirror_keeps_virusshare_manifest_on_timeout(tmp_path, monkeypatch):
+    previous = tmp_path / "prev"
+    previous.mkdir()
+    packed = gzip.compress(b"a" * 32 + b"\n")
+    name = "virusshare_00001-202601010000.md5.gz"
+    (previous / name).write_bytes(packed)
+    files = {"virusshare_00001": {"name": name, "sha256": hashlib.sha256(packed).hexdigest()}}
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(feeds_mirror, "_virusshare_last",
+                        lambda hint: (_ for _ in ()).throw(TimeoutError()))
+    assert feeds_mirror._mirror_virusshare(out, previous, files, "now", {}) == files
+    assert (out / name).read_bytes() == packed
+
+
+def test_mirror_wont_resign_untrusted_previous_manifest(tmp_path):
+    previous = tmp_path / "prev"
+    feeds_mirror.build(previous, KEY, fake_sources())
+    manifest = json.loads((previous / "manifest.json").read_text(encoding="utf-8"))
+    manifest["files"]["threatfox"]["sha256"] = "0" * 64
+    (previous / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    output = feeds_mirror.build(tmp_path / "out", KEY, fake_sources(fail=("threatfox",)),
+                                previous=previous)
+    assert "threatfox" not in output["files"]
+
+
+def test_mirror_refuses_unsigned_publication(tmp_path, monkeypatch):
+    monkeypatch.delenv("FEEDS_SIGN_KEY")
+    with pytest.raises(ValueError, match="FEEDS_SIGN_KEY"):
+        feeds_mirror.build(tmp_path, KEY, fake_sources())
+
+
+def test_client_reads_signed_virusshare_md5_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(feeds_mirror, "_virusshare_last", lambda hint: 0)
+    monkeypatch.setattr(feeds_mirror, "_download", lambda *a, **kw: b"a" * 32 + b"\n")
+    manifest = feeds_mirror.build(tmp_path, KEY, {})
+    def read(url, **kwargs):
+        return (tmp_path / url.rsplit("/", 1)[-1]).read_bytes()
+    monkeypatch.setattr(updater, "_download", read)
+    updater.reset_mirror()
+    try:
+        assert updater.mirror_file("virusshare_00000") == b"a" * 32 + b"\n"
+        assert manifest["files"]["virusshare_00000"]["name"].endswith(".md5.gz")
+    finally:
+        updater.reset_mirror()
+
+
 @pytest.fixture
 def mirror(tmp_path, monkeypatch):
     """Зеркало на диске + updater, который вместо сети читает его; прямые источники —
@@ -171,7 +222,9 @@ def test_bad_hash_is_rejected_and_direct_used(mirror):
 
 
 def test_stale_mirror_is_not_used(mirror):
+    import ed25519
     manifest = dict(mirror["manifest"], generated=int(time.time()) - 5 * 86400)
+    manifest["signature"] = ed25519.sign(bytes(range(32)), ed25519.signable(manifest)).hex()
     (mirror["out"] / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     updater.reset_mirror()
     assert not updater.update_hashes()                  # без ключа и без свежего зеркала

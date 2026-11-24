@@ -113,8 +113,11 @@ def profiles_by_recency() -> list[tuple[Path, int]]:
                 try:
                     with winreg.OpenKey(key, sid) as sub:
                         raw = winreg.QueryValueEx(sub, "ProfileImagePath")[0]
-                        high = winreg.QueryValueEx(sub, "ProfileLoadTimeHigh")[0]
-                        low = winreg.QueryValueEx(sub, "ProfileLoadTimeLow")[0]
+                        try:
+                            high = winreg.QueryValueEx(sub, "ProfileLoadTimeHigh")[0]
+                            low = winreg.QueryValueEx(sub, "ProfileLoadTimeLow")[0]
+                        except OSError:
+                            high = low = 0  # отсутствие времени не исключает профиль из защиты
                 except OSError:
                     continue
                 folder = Path(os.path.expandvars(raw))
@@ -618,7 +621,25 @@ class ServiceCore:
     # --- карантин: файлы пользователя — только через переданные дескрипторы ---
     def op_quarantine_list(self, client, args):
         from quarantine import list_quarantine
-        return list_quarantine(bool(args.get("history")))
+        return [m for m in list_quarantine(bool(args.get("history")))
+                if client.elevated or (client.sid and m.get("sid") == client.sid)]
+
+    def _quarantine_access(self, client, item_id):
+        from quarantine import _read_meta
+        meta = _read_meta(str(item_id))
+        # Старые и машинные записи без владельца изменяет только администратор.
+        if not client.elevated and (not client.sid or meta.get("sid") != client.sid):
+            raise PermissionError("карантин другой учётной записи")
+        return meta
+
+    def _threat_access(self, client, record_id):
+        from recovery import threatlog
+        record = threatlog.get(str(record_id))
+        if record is None:
+            raise ValueError("запись журнала не найдена")
+        if not client.elevated and (not client.sid or record.get("sid") != client.sid):
+            raise PermissionError("изменение общей или чужой записи требует администратора")
+        return record
 
     def op_quarantine_add(self, client, args):
         import msvcrt
@@ -637,13 +658,15 @@ class ServiceCore:
             f.seek(0)
             qid = quarantine.quarantine_stream(
                 f, path, reason,
-                delete=lambda: winapi.delete_by_handle(msvcrt.get_osfhandle(f.fileno())))
+                delete=lambda: winapi.delete_by_handle(msvcrt.get_osfhandle(f.fileno())),
+                sid=client.sid)
         self.log.info("Карантин по запросу окна: %s", path)
         return {"id": qid, "path": path}
 
     def op_quarantine_restore(self, client, args):
         import quarantine
         from service import winapi
+        self._quarantine_access(client, args["id"])
         h = winapi.take_handle(client.pid, int(args["handle"]))
         try:
             winapi.check_disk_file(h)
@@ -662,6 +685,7 @@ class ServiceCore:
 
     def op_quarantine_delete(self, client, args):
         from quarantine import delete_file
+        self._quarantine_access(client, args["id"])
         return delete_file(str(args["id"]))
 
     # --- журнал защиты ---
@@ -691,7 +715,11 @@ class ServiceCore:
         status = str(args["status"])
         if status not in threatlog.STATUS_TEXT:
             raise ValueError("неизвестное состояние")
-        threatlog.set_status(str(args["id"]), status, str(args.get("qid") or ""))
+        self._threat_access(client, args["id"])
+        qid = str(args.get("qid") or "")
+        if qid:
+            self._quarantine_access(client, qid)
+        threatlog.set_status(str(args["id"]), status, qid)
         return True
 
     def op_threats_mark_path(self, client, args):
@@ -699,11 +727,20 @@ class ServiceCore:
         status = str(args["status"])
         if status not in threatlog.STATUS_TEXT:
             raise ValueError("неизвестное состояние")
-        threatlog.mark_path(str(args["path"]), status, str(args.get("qid") or ""))
+        records = [r for r in threatlog.merged(True)
+                   if os.path.normcase(r["path"]) == os.path.normcase(str(args["path"]))
+                   and r["status"] == threatlog.FOUND]
+        for record in records:
+            self._threat_access(client, record["id"])
+        qid = str(args.get("qid") or "")
+        if qid:
+            self._quarantine_access(client, qid)
+        threatlog.mark_path(str(args["path"]), status, qid)
         return True
 
     def op_threats_dismiss(self, client, args):
         from recovery import threatlog
+        self._threat_access(client, args["id"])
         threatlog.dismiss(str(args["id"]))
         return True
 
@@ -876,4 +913,3 @@ class _NullGuard:
 
     def reload_trust(self):
         pass
-

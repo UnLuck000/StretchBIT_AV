@@ -1,8 +1,9 @@
 """Ed25519 (RFC 8032): подпись и проверка без внешних пакетов (как x25519 в vpn/warp.py).
 
 Нужно для подписи манифеста баз (updater._mirror_manifest, tools/feeds_mirror.py): публичный
-ключ вшит в программу, закрытый — только у разработчика (в Secrets GitHub Actions). Так
-компрометация репозитория/CI/ветки feeds не позволит подменить базы без ключа.
+ключ закреплён в программе, закрытый — в Secrets GitHub Actions. Подмена ветки feeds
+без ключа не пройдёт проверку. Доверенный workflow CI имеет доступ к ключу и остаётся
+частью границы доверия (docs/FEEDS_SIGNING.md).
 
 Проверено тестами на векторах RFC 8032 (tests/test_ed25519.py).
 """
@@ -70,14 +71,16 @@ def _encode(point) -> bytes:
 def _decode(enc: bytes):
     """32 байта → точка."""
     y = int.from_bytes(enc, "little") & ((1 << 255) - 1)
+    if len(enc) != 32 or y >= p:
+        raise ValueError("неканоническая точка Ed25519")
     x = _x_from_y(y)
+    if (x * x * (d * y * y + 1) - (y * y - 1)) % p:
+        raise ValueError("точка вне кривой Ed25519")
+    if x == 0 and enc[31] >> 7:
+        raise ValueError("неканонический знак точки Ed25519")
     if x & 1 != enc[31] >> 7:
         x = p - x
     return (x, y, 1, x * y % p)
-
-
-def _scalar(enc: bytes) -> int:
-    return int.from_bytes(enc, "little") % L
 
 
 def _clamp(h: bytes) -> int:
@@ -89,13 +92,17 @@ def _clamp(h: bytes) -> int:
 
 def public_key(secret: bytes) -> bytes:
     """Публичный ключ (32 байта) из закрытого (32 байта)."""
-    h = hashlib.sha512(secret[:32]).digest()
+    if len(secret) != 32:
+        raise ValueError("закрытый ключ Ed25519 должен содержать 32 байта")
+    h = hashlib.sha512(secret).digest()
     return _encode(_mul(B, _clamp(h)))
 
 
 def sign(secret: bytes, message: bytes) -> bytes:
     """Подпись (64 байта) сообщения закрытым ключом (32 байта)."""
-    h = hashlib.sha512(secret[:32]).digest()
+    if len(secret) != 32:
+        raise ValueError("закрытый ключ Ed25519 должен содержать 32 байта")
+    h = hashlib.sha512(secret).digest()
     a = _clamp(h)
     r = int.from_bytes(hashlib.sha512(h[32:] + message).digest(), "little") % L
     big_r = _mul(B, r)
@@ -109,9 +116,19 @@ def verify(public: bytes, message: bytes, signature: bytes) -> bool:
     """Проверка подписи (64 байта) сообщения публичным ключом (32 байта)."""
     if len(public) != 32 or len(signature) != 64:
         return False
-    big_a = _decode(public)
-    big_r = _decode(signature[:32])
-    s = _scalar(signature[32:])
+    s = int.from_bytes(signature[32:], "little")
+    if s >= L:
+        return False
+    try:
+        big_a = _decode(public)
+        big_r = _decode(signature[:32])
+    except ValueError:
+        return False
+    identity = b"\x01" + b"\x00" * 31
+    # Ключ и R — ненулевые точки главной подгруппы, не точки малого порядка.
+    for point in (big_a, big_r):
+        if _encode(point) == identity or _encode(_mul(point, L)) != identity:
+            return False
     k = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(),
                        "little") % L
     left = _mul(B, s)

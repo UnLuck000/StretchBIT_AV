@@ -115,8 +115,9 @@ class DatabasesMixin:
             return
         if cfg.get("update/shown") == release.version:
             return  # эту версию уже обрабатывали — не докучать каждые 5 минут
-        cfg.set_("update/shown", release.version)
         if self.isHidden():  # в трее: уведомление, окно изменений — когда откроют программу
+            if getattr(getattr(self, "_pending_changelog", None), "version", None) == release.version:
+                return  # не повторяем уведомление в этом сеансе; после рестарта предложим снова
             self._pending_changelog = release
             self._notify_update(release)
         else:               # окно открыто: сразу окно со списком изменений
@@ -152,6 +153,7 @@ class DatabasesMixin:
         win.update_requested.connect(lambda: self._download_and_install(release))
         self.changelog_window = win
         win.show()
+        cfg.set_("update/shown", release.version)  # только действительно показанное окно
         win.raise_()
         win.activateWindow()
 

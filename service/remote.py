@@ -62,7 +62,7 @@ class Remote:
     def quarantine_file(self, path, reason: str) -> str:
         path = os.path.abspath(str(path))
         h = winapi.open_file(path, winapi.GENERIC_READ | winapi.DELETE,
-                             winapi.FILE_SHARE_READ | winapi.FILE_SHARE_DELETE,
+                             winapi.FILE_SHARE_READ,
                              winapi.OPEN_EXISTING)
         try:
             return self.client.call("quarantine.add", timeout=120.0, handle=int(h),

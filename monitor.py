@@ -7,7 +7,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
-from scanner.engine import check_file, reason_level
+from scanner.engine import automatic_action, check_file, confirm_automatic
 from scanner.hashing import load_all_signatures
 from scanner.whitelist import trusted_hashes
 from processmanager.memscan import shared_rules
@@ -117,7 +117,7 @@ def auto_quarantine(path, reason: str) -> bool:
     """Сразу в карантин: уровень «угроза» (хэш в базе или сильное правило YARA), файл не из
     папки Windows. «Подозрительное» (эвристика, слабые YARA, PUA/HackTool, уязвимые драйверы,
     расширения) не карантинится — только сообщение в журнале защиты."""
-    if not reason or reason_level(reason) != "threat":
+    if not automatic_action(reason):
         return False
     windows = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows")) + os.sep
     return not os.path.normcase(str(path)).startswith(windows)
@@ -361,10 +361,19 @@ class RealtimeMonitor:
         # сначала завершаем запущенный из файла процесс (иначе файл занят и не удалится),
         # затем сам файл в карантин. «Подозрительное» — только сообщение, в карантин вручную.
         if auto_quarantine(path, reason):
-            killed = _kill_processes(path)
+            killed = 0
+            def stop_processes():
+                nonlocal killed
+                killed = _kill_processes(path)
             try:
                 from quarantine import quarantine_file
-                quarantine_file(path, reason=reason)
+                digest = getattr(reason, "sha256", "")
+                if not digest:
+                    raise OSError("нет хэша проверенного файла; требуется повторная проверка")
+                quarantine_file(path, reason=reason, expected_sha256=digest,
+                                before_delete=stop_processes,
+                                verify=lambda fin: confirm_automatic(
+                                    path, fin, self._signatures, self._rules, trusted_hashes()))
                 action = "перемещён в карантин" + \
                     (f", процесс завершён ({killed})" if killed else "")
                 self._emit("threat", f"{path}\t{reason}\t{action}")

@@ -56,6 +56,9 @@ def test_update_all_partial_and_full(monkeypatch):
     assert updater.update_all() is True
     monkeypatch.setattr(updater, "update_rules", lambda part=None: False)  # один шаг не удался
     assert updater.update_all() == "partial"
+    monkeypatch.setattr(updater, "update_rules", lambda part=None: True)
+    monkeypatch.setattr(updater, "update_virusshare", lambda progress=None, part=None: "partial")
+    assert updater.update_all() == "partial"
 
 
 def test_dashboard_card(qapp):

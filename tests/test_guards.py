@@ -56,8 +56,11 @@ def test_threat_is_killed(monkeypatch, tmp_path):
     monkeypatch.setattr(launchguard, "_resume", lambda pid: resumed.append(pid))
     killed, quarantined = [], []
     monkeypatch.setattr(launchguard, "_kill_tree", lambda pid: killed.append(pid) or True)
-    monkeypatch.setattr(launchguard, "_quarantine_threat",
-                        lambda path, reason: quarantined.append(path) or True)
+    def isolate(path, reason, before_delete=None, verify=None):
+        before_delete()
+        quarantined.append(path)
+        return True
+    monkeypatch.setattr(launchguard, "_quarantine_threat", isolate)
     guard._check_new(1234, 1, str(exe), [])
     assert events[0][0] == "blocked" and events[0][1]["killed"] is True
     assert events[0][1]["quarantined"] is True
@@ -70,10 +73,12 @@ def test_quarantine_threat_skips_windows(monkeypatch):
     import quarantine
     called = []
     monkeypatch.setattr(quarantine, "quarantine_file",
-                        lambda path, reason: called.append(str(path)) or "id")
+                         lambda path, reason, **kw: called.append(str(path)) or "id")
     assert launchguard._quarantine_threat(r"C:\Windows\System32\x.dll", "hash match") is False
     assert called == []
-    assert launchguard._quarantine_threat(r"C:\Users\u\Downloads\x.exe", "hash match") is True
+    from scanner.engine import Finding
+    assert launchguard._quarantine_threat(r"C:\Users\u\Downloads\x.exe",
+                                         Finding("hash match", "a" * 64)) is True
     assert called == [r"C:\Users\u\Downloads\x.exe"]
 
 

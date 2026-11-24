@@ -9,7 +9,7 @@ from scanner.yara_engine import match_details, rules_version
 from scanner.signature import (INVALID, REVOKED, UNSIGNED, VALID, check_revocation, trusted_fast,
                                inspect_signature)
 
-ENGINE_VERSION = "9"  # 15.11.2026: две очереди правил YARA, кэш правил «YARA» без YARA
+ENGINE_VERSION = "10"  # слабые признаки не разрешают автоматическое удаление
 # файлы до этого размера читаются один раз: хэши, YARA и эвристика берут байты из памяти
 ONE_READ_LIMIT = 32 * 1024 * 1024  # меняется вместе с логикой проверки: старые вердикты в кэше не годятся
 
@@ -58,6 +58,19 @@ def cache_version(signatures, rules, heuristics: bool = True) -> str | None:
             f"|{int(_revocation)}")
 
 
+class Finding(str):
+    """Причина вместе с хэшем проверенного содержимого (для безопасного автокарантина)."""
+
+    def __new__(cls, reason: str, sha256: str):
+        obj = super().__new__(cls, reason)
+        obj.sha256 = sha256
+        return obj
+
+
+def finding(reason: str | None, digest: str):
+    return Finding(reason, digest) if reason else None
+
+
 def check_file(p: Path, signatures, rules=None,
                whitelist: set[str] | None = None, heuristics: bool = True,
                use_cache: bool = True) -> str | None:
@@ -71,7 +84,7 @@ def check_file(p: Path, signatures, rules=None,
         cached = verdict_cache.get(p, st, version)
         if cached is not None:
             digest, reason = cached
-            return None if whitelist and digest in whitelist else reason
+            return None if whitelist and digest in whitelist else finding(reason, digest)
     kind = media.plain_media(p, st.st_size)  # видео и аудио: без YARA и эвристики
     if kind and st.st_size > media.MEDIA_HASH_LIMIT:
         digest, reason = "", None  # крупный медиафайл целиком не читается
@@ -90,7 +103,7 @@ def check_file(p: Path, signatures, rules=None,
         reason = overrides.filter_reason(digest, found)
     if version:
         verdict_cache.put(p, st, version, digest, reason)
-    return reason
+    return finding(reason, digest)
 
 
 def hash_verdict(size: int, digest: str, md5: str, signatures) -> str | None:
@@ -128,6 +141,43 @@ def reason_level(reason: str) -> str:
     if reason.startswith(("Heuristic", WEAK_PREFIX, CHECK_PREFIX)):
         return "suspicious"
     return "threat"
+
+
+def automatic_action(reason: str) -> bool:
+    """Автодействие только по хэшу/сильному YARA, неизвестная причина — не разрешение."""
+    return bool(reason) and reason.startswith(("hash match", "YARA: "))
+
+
+def confirm_automatic(path: Path, stream, signatures, rules, whitelist=None) -> bool:
+    """Повторная проверка неизменяемого открытого объекта перед автодействием.
+
+    Большие файлы в пуле проверяются разными заданиями: их хэш и YARA могли читать
+    разные версии пути. Поэтому одного совпавшего ожидаемого хэша недостаточно.
+    """
+    from scanner import archive
+    from scanner.yara_engine import MAX_FILE_SIZE
+    import hashlib
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(0)
+    if size <= MAX_FILE_SIZE:
+        data = stream.read(MAX_FILE_SIZE + 1)
+        digest, md5 = data_hashes(data)
+    else:
+        data = None
+        sha, md = hashlib.sha256(), hashlib.md5()
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            sha.update(chunk)
+            md.update(chunk)
+        digest, md5 = sha.hexdigest(), md.hexdigest()
+    if whitelist and digest in whitelist:
+        return False
+    reason = hash_verdict(size, digest, md5, signatures)
+    if reason is None and data is not None:
+        reason = analyze(path, rules, data=data)
+        reason = archive.resolve(archive.pack(reason, path, data, rules), signatures,
+                                 hash_verdict)
+    return automatic_action(overrides.filter_reason(digest, reason))
 
 
 def compiled_rules(p: Path, data: bytes | None = None) -> bool:
@@ -189,9 +239,8 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
         sig = trusted_fast(p, inspect_signature(p), revocation)
         if sig.status == VALID:
             return None
-    # вторая очередь (15.11.2026): нашла первая (YARA, эвристика) — тоже угроза; первая не
-    # нашла — «проверить», если подписи нет или она недействительна; подпись действительна —
-    # не учитывается
+    # Вторая очередь даёт «проверить». Только сильное правило или хэш разрешает
+    # автоматическое действие: сочетание слабых/эвристических признаков этого не меняет.
     confirm: list[str] = []
     if rules is not None and not compiled_rules(p, data):
         matches = match_details(rules, p, data=data)
@@ -206,18 +255,18 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
             sig = sig or _trusted_signature(p, inspect_signature(p), revocation)
             names = ", ".join(m.rule for m in first)
             also = f" (подтверждают: {', '.join(confirm)})" if confirm else ""
+            strong = any(tiers[m.rule] == STRONG for m in first)
             if sig.status == REVOKED:
-                return "YARA: " + names + also + " [сертификат отозван]"
+                return ("YARA: " if strong else WEAK_PREFIX) + names + also + \
+                    " [сертификат отозван]"
             # действительная подпись доверенного издателя (Microsoft, JetBrains...):
             # совпадение правила считается ложным, как и у эвристики ниже
             if sig.status != VALID:
                 if all(weak_match(m) or tiers[m.rule] == WEAK for m in first):
                     partner = _partner(p)
                 if not partner:
-                    strong = any(tiers[m.rule] == STRONG for m in first)
-                    # слабые правила (инструменты, нежелательное) в одиночку — подозрительно;
-                    # подтверждённые второй очередью — угроза
-                    return ("YARA: " if strong or confirm else WEAK_PREFIX) + names + also
+                    # Инструменты/нежелательное остаются подозрительными и при confirm.
+                    return ("YARA: " if strong else WEAK_PREFIX) + names + also
     if heuristics:
         report = analyze_pe(p, data)
         if report.score >= threshold:
@@ -230,8 +279,8 @@ def analyze(p: Path, rules, heuristics: bool = True, threshold: int | None = Non
                 return _check_reason(confirm, partner) if confirm else None
             note = {UNSIGNED: " [нет подписи]", INVALID: " [подпись недействительна]",
                     REVOKED: " [сертификат отозван]"}
-            if confirm:  # эвристика + правило второй очереди — угроза
-                return (f"YARA: {', '.join(confirm)} (подтверждено эвристикой: "
+            if confirm:  # коррелирующие слабые признаки — проверка, не автокарантин
+                return (f"{CHECK_PREFIX}{', '.join(confirm)} (совпало с эвристикой: "
                         f"{report.summary()}){note.get(sig.status, '')}")
             return "Heuristic: " + report.summary() + note.get(sig.status, "")
     if confirm:

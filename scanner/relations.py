@@ -40,7 +40,7 @@ HUNTING_RE = re.compile(r"hunting|(^|_)hunt(_|$)", re.IGNORECASE)
 def rule_tier(match) -> str:
     """Очередь правила YARA (15.11.2026):
     • confirm — вторая очередь: список «confirm» в overrides (правила с ложными
-      срабатываниями) и поисковые (category hunting). В одиночку находку не делают;
+      срабатываниями) и поисковые (category hunting). Дают «проверить», без автодействия;
     • weak — инструменты и нежелательное (PUA, HackTool, category TOOL, score < 70): в
       одиночку — «подозрительно», не угроза (настоящий LaZagne так не пропадёт);
     • strong — правила на вредоносы: угроза."""

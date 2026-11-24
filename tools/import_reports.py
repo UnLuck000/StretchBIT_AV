@@ -31,6 +31,7 @@ MAX_FILES = 1000               # файлов в архиве
 MAX_ONE = 128 * 2 ** 20        # один файл, распакованный, байт
 MAX_TOTAL = 512 * 2 ** 20      # весь архив, распакованный, байт
 MAX_RATIO = 200                # распакованный / сжатый (выше — похоже на бомбу)
+MAX_MANIFEST = 1 * 2 ** 20     # сведения о системе, не журнал и не снимки
 
 
 def windows_folder(manifest: dict) -> str:
@@ -60,7 +61,17 @@ def _free(folder: Path) -> Path:
 def import_zip(archive: Path, dest: Path = DEST, now: float | None = None) -> Path:
     with zipfile.ZipFile(archive) as z:
         try:
-            manifest = json.loads(z.read("manifest.json").decode("utf-8"))
+            info = z.getinfo("manifest.json")
+            if info.file_size > MAX_MANIFEST or (info.file_size and
+                    info.file_size / max(1, info.compress_size) > MAX_RATIO):
+                raise ValueError(f"{archive.name}: слишком большой manifest.json")
+            with z.open(info) as src:
+                raw = src.read(MAX_MANIFEST + 1)
+            if len(raw) > MAX_MANIFEST:
+                raise ValueError(f"{archive.name}: слишком большой manifest.json")
+            manifest = json.loads(raw.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError(f"{archive.name}: manifest.json должен быть объектом")
         except KeyError:
             raise ValueError(f"{archive.name}: нет manifest.json — это не архив сведений "
                              "StretchBIT") from None

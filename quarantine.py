@@ -55,11 +55,11 @@ def _xor_copy(src: Path, dst: Path) -> None:
 
 
 def _file_key(f) -> tuple | None:
-    """(том, индекс) файла по открытому дескриптору (Windows FileId). Не Windows или
-    сбой чтения — None (проверку пропускаем)."""
+    """(том, индекс) файла по Windows HANDLE. На Windows сбой — ошибка, не пропуск."""
     if os.name != "nt":
         return None
     import ctypes
+    import msvcrt
     from ctypes import wintypes
     class _Info(ctypes.Structure):  # BY_HANDLE_FILE_INFORMATION
         _fields_ = [("attr", wintypes.DWORD), ("created", wintypes.FILETIME),
@@ -69,15 +69,16 @@ def _file_key(f) -> tuple | None:
                     ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD)]
     k = ctypes.WinDLL("kernel32", use_last_error=True)
     info = _Info()
-    if not k.GetFileInformationByHandle(wintypes.HANDLE(f.fileno()), ctypes.byref(info)):
-        return None
+    if not k.GetFileInformationByHandle(wintypes.HANDLE(msvcrt.get_osfhandle(f.fileno())),
+                                         ctypes.byref(info)):
+        raise ctypes.WinError(ctypes.get_last_error())
     return (info.volume, info.index_high, info.index_low)
 
 
 def _same_file(path: Path, key: tuple | None) -> bool:
     """Путь всё ещё ведёт к тому же файлу, что читали (защита от подмены между шагами)."""
     if key is None:
-        return True  # не Windows или сведения не прочитать — не блокируем
+        return False  # отсутствие идентичности не подтверждает совпадение
     try:
         with open(path, "rb") as f:
             return _file_key(f) == key
@@ -133,10 +134,13 @@ def _now() -> str:
 
 
 def _meta_path(item_id: str) -> Path:
+    if not item_id or not item_id.isascii() or not item_id.isalnum():
+        raise ValueError("неверный идентификатор карантина")
     return QUARANTINE_DIR / f"{item_id}.json"
 
 
 def _stored_path(item_id: str) -> Path:
+    _meta_path(item_id)  # одинаковая проверка имени для данных и метаданных
     return QUARANTINE_DIR / f"{item_id}.quar"
 
 
@@ -184,54 +188,51 @@ def set_remote(backend) -> None:
     _remote = backend
 
 
-def quarantine_file(path: Path, reason: str) -> str:
+def quarantine_file(path: Path, reason: str, *, expected_sha256: str = "",
+                    before_delete=None, verify=None) -> str:
     """Перемещает файл в карантин и возвращает его идентификатор. NeedAdmin — нет прав на
     папку карантина; PermissionError — файл занят."""
-    import hashlib
     if _remote is not None:
+        if expected_sha256 or before_delete is not None or verify is not None:
+            raise OSError("автокарантин выполняется только в движке защиты")
         return _remote.quarantine_file(path, reason)
     _check_writable()
     path = Path(path).resolve()
-
-    # сначала подпись, потом словарь: переменная должна существовать до его создания
     try:
         signature_text = describe(inspect_signature(path))
-    except Exception:  # подпись не должна мешать изоляции файла
+    except Exception:  # подпись не должна мешать сохранению резервной копии
         signature_text = ""
-
-    item_id = uuid.uuid4().hex
-    stored = _stored_path(item_id)
-    digest = hashlib.sha256()
+    if os.name != "nt":
+        # Без удаления по дескриптору не обещаем безопасное автодействие.
+        raise OSError("безопасный карантин поддерживается только в Windows")
+    import msvcrt
+    from service import winapi
+    # Без FILE_SHARE_WRITE/DELETE: нельзя менять или переименовать открытый объект.
+    h = winapi.open_file(str(path), winapi.GENERIC_READ | winapi.DELETE,
+                         winapi.FILE_SHARE_READ, winapi.OPEN_EXISTING)
     try:
-        # один дескриптор на хэш и копию: между ними файл не подменяется (раньше был
-        # sha256_of() → снова открыть → удалить по пути — другой процесс мог подменить файл)
-        with open(path, "rb") as fin:
-            key = _file_key(fin)
-            with open(stored, "wb") as fout:
-                size = _xor_stream(fin, fout, digest)
-            if not _same_file(path, key):
-                raise OSError("файл был подменён во время изоляции")
-        meta = {
-            "id": item_id,
-            "status": STATUS_QUARANTINED,
-            "original_path": str(path),
-            "sha256": digest.hexdigest(),
-            "size": size,
-            "reason": reason,
-            "signature": signature_text,
-            "quarantined_at": _now(),
-            "encoding": ENCODING,
-        }
-        _write_meta(meta)
-        path.unlink()  # исходный файл убираем только после готовой копии
+        winapi.check_disk_file(h)
+        original = winapi.final_path(h)
+        if not original:
+            raise OSError("не удалось определить путь открытого файла")
+        windows = os.path.normcase(os.path.abspath(
+            os.environ.get("SystemRoot", r"C:\Windows"))).rstrip("\\/") + os.sep
+        if expected_sha256 and os.path.normcase(original).startswith(windows):
+            raise OSError("автокарантин системного файла запрещён")
+        fd = winapi.fd_from_handle(h, write=False)
     except BaseException:
-        stored.unlink(missing_ok=True)
-        _meta_path(item_id).unlink(missing_ok=True)
+        winapi.close(h)
         raise
-    return item_id
+    with os.fdopen(fd, "rb") as fin:
+        return quarantine_stream(
+            fin, original, reason, expected_sha256=expected_sha256, signature=signature_text,
+            before_delete=before_delete, verify=verify,
+            delete=lambda: winapi.delete_by_handle(msvcrt.get_osfhandle(fin.fileno())))
 
 
-def quarantine_stream(fin, original_path: str, reason: str, delete=None) -> str:
+def quarantine_stream(fin, original_path: str, reason: str, delete=None, *,
+                      sid: str = "", expected_sha256: str = "", before_delete=None,
+                      signature: str = "", verify=None) -> str:
     """Карантин из уже открытого файла (служба: дескриптор открыл интерфейс со своими
     правами, путь от пользователя служба не открывает). delete() — удалить исходный файл
     через тот же дескриптор; ошибка удаления отменяет карантин."""
@@ -243,6 +244,10 @@ def quarantine_stream(fin, original_path: str, reason: str, delete=None) -> str:
     try:
         with open(stored, "wb") as fout:
             size = _xor_stream(fin, fout, digest)
+        if expected_sha256 and digest.hexdigest() != expected_sha256:
+            raise OSError("содержимое файла изменилось после проверки")
+        if verify is not None and not verify(fin):
+            raise OSError("повторная проверка открытого файла не подтвердила угрозу")
         meta = {
             "id": item_id,
             "status": STATUS_QUARANTINED,
@@ -250,11 +255,14 @@ def quarantine_stream(fin, original_path: str, reason: str, delete=None) -> str:
             "sha256": digest.hexdigest(),
             "size": size,
             "reason": reason,
-            "signature": "",
+            "signature": signature,
             "quarantined_at": _now(),
             "encoding": ENCODING,
+            "sid": sid,
         }
         _write_meta(meta)
+        if before_delete is not None:
+            before_delete()
         if delete is not None:
             delete()
     except BaseException:

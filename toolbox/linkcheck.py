@@ -14,6 +14,7 @@ import secrets
 import time
 import urllib.parse
 import urllib.request
+import public_http
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -107,34 +108,9 @@ def _file_name(response, url: str) -> str:
     return name[:150]
 
 
-# адреса, куда скачивание по ссылке ходить не должно (редирект не должен превратить
-# скачивание из интернета в обращение к локальной машине или приватной сети)
-_LOCAL_NETS = [
-    ipaddress.ip_network("0.0.0.0/8"), ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"), ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"), ipaddress.ip_network("224.0.0.0/4"),
-    ipaddress.ip_network("240.0.0.0/4"), ipaddress.ip_network("::/128"),
-    ipaddress.ip_network("::1/128"), ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"), ipaddress.ip_network("ff00::/8"),
-]
-
-
 def _blocked_target(url: str) -> str:
     """Причина, по которой адрес нельзя скачивать, или '' — можно."""
-    parts = urllib.parse.urlsplit(url)
-    scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
-    if scheme not in ("http", "https"):
-        return f"схема {scheme or 'пусто'}"
-    if host in ("localhost",) or host.endswith(".local") or host.endswith(".localhost"):
-        return "локальный адрес"
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return ""  # имя: IP не проверить, но localhost выше уже отсечён
-    if any(ip in net for net in _LOCAL_NETS):
-        return "локальный или приватный адрес"
-    return ""
+    return public_http.blocked_url(url)
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -150,8 +126,11 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
 def download(url: str, progress=None, cancel=None) -> Path:
     """Скачивает файл в DOWNLOAD_DIR. progress(получено, всего). OSError — ошибка сети."""
     url = normalize(url)
+    reason = _blocked_target(url)
+    if reason:
+        raise OSError(f"Небезопасный адрес ({reason})")
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 StretchBIT/1.0"})
-    opener = urllib.request.build_opener(_SafeRedirect())
+    opener = public_http.opener(_SafeRedirect())
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     with opener.open(request, timeout=30) as response:
         total = int(response.headers.get("Content-Length") or 0)

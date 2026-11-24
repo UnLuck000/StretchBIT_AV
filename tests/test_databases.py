@@ -163,7 +163,7 @@ def test_virusshare_step_respects_budget(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 511)
     monkeypatch.setattr(updater, "VIRUSSHARE_BUDGET", 0)   # лимит исчерпан сразу
     progress = []
-    assert updater.update_virusshare(progress=progress.append) is True
+    assert updater.update_virusshare(progress=progress.append) is False
     assert any("список 1 из 50" in p for p in progress)
     assert "не успел" in capsys.readouterr().out
     assert json.loads((tmp_path / "feeds" / "virusshare.json").read_text()) == {"last": 511}

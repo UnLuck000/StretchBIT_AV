@@ -530,7 +530,7 @@ class SettingsPage(_UiPage):
     def load_values(self) -> None:
         for widget in self._all:
             widget.blockSignals(True)
-        self.chk_autostart.setChecked(cfg.autostart_enabled())
+        self.chk_autostart.setChecked(cfg.get("startup/autostart"))
         self.chk_block_exit.setChecked(cfg.get("general/block_exit"))
         self.chk_on_top.setChecked(cfg.get("general/on_top"))
         self.chk_decoys.setChecked(cfg.get("protect/decoys"))
@@ -603,15 +603,17 @@ class SettingsPage(_UiPage):
         self.changed.emit(key, value)
 
     def _on_autostart(self, checked: bool) -> None:
+        previous = cfg.get("startup/autostart")
         try:
             cfg.set_("startup/autostart", checked)
             # задание входа есть всегда (возврат сети после VPN): меняется только его режим —
             # вся программа (--autostart) или лёгкий возврат сети (--recover-network)
             cfg.set_autostart(True)
         except OSError as e:
+            cfg.set_("startup/autostart", previous)
             QMessageBox.warning(self, "Автозапуск", f"Не удалось изменить автозапуск: {e}")
             self.chk_autostart.blockSignals(True)
-            self.chk_autostart.setChecked(not checked)
+            self.chk_autostart.setChecked(previous)
             self.chk_autostart.blockSignals(False)
 
     def _reset(self) -> None:

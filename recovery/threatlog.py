@@ -70,15 +70,18 @@ def add(path: str, level: str, text: str, source: str = "", story: str = "",
     with _lock:
         records = _read()
         for r in records:
-            if r["status"] == FOUND and r.get("key") == key and r["text"] == text:
+            if (r["status"] == FOUND and r.get("key") == key and r["text"] == text
+                    and r.get("sid", "") == sid):
                 r["time"], r["count"] = _now(), r.get("count", 1) + 1
+                r["scope"] = "user" if sid else "machine"
                 if story:
                     r["story"], r["pid"] = story, pid
                 _write(records)
                 return r["id"]
         record = {"id": uuid.uuid4().hex, "time": _now(), "first": _now(), "count": 1,
                   "key": key, "path": path, "level": level, "text": text,
-                  "source": source, "status": FOUND, "qid": ""}
+                  "source": source, "status": FOUND, "qid": "",
+                  "scope": "user" if sid else "machine"}
         if sid:
             record["sid"] = sid
         if story:
@@ -104,7 +107,7 @@ def set_status(record_id: str, status: str, qid: str = "") -> None:
 def merged(include_done: bool = False, sid: str | None = None) -> list[dict]:
     """Записи журнала и файлы карантина, которых в нём нет; состояние карантина — по его
     метаданным (файл могли восстановить или удалить из другого окна). sid — оставить только
-    записи этой учётной записи и записи без учётной записи (защита всей машины); None — все."""
+    записи этой учётной записи и явно машинные записи; None — все (администратор)."""
     if _remote is not None:
         return _remote.merged(include_done, sid)
     from quarantine import STATUS_DELETED, STATUS_QUARANTINED, STATUS_RESTORED, list_quarantine
@@ -113,8 +116,15 @@ def merged(include_done: bool = False, sid: str | None = None) -> list[dict]:
     metas = {m["id"]: m for m in list_quarantine(include_history=True)}
     with _lock:
         records = _read()
+    def visible(record):
+        return (sid is None or (bool(sid) and record.get("sid") == sid)
+                or (not record.get("sid") and record.get("scope") == "machine"))
+    # Старые записи без владельца/явной машинной области не раскрываются всем.
+    hidden_qids = {r.get("qid") for r in records if not visible(r)}
     if sid is not None:
-        records = [r for r in records if r.get("sid", "") in ("", sid)]
+        records = [r for r in records if visible(r)]
+        metas = {k: m for k, m in metas.items()
+                 if m.get("sid") == sid and k not in hidden_qids}
     linked = set()
     for r in records:
         meta = metas.get(r.get("qid") or "")
@@ -130,6 +140,8 @@ def merged(include_done: bool = False, sid: str | None = None) -> list[dict]:
                         "status": q_status.get(meta["status"], QUARANTINED),
                         "qid": meta["id"], "count": 1, "sha256": meta.get("sha256", ""),
                         "signature": meta.get("signature", "")})
+        if meta.get("sid"):
+            records[-1]["sid"] = meta["sid"]
     if not include_done:
         records = [r for r in records if r["status"] in OPEN]
     return sorted(records, key=lambda r: r.get("time", ""), reverse=True)

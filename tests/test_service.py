@@ -64,6 +64,59 @@ def user(sid="S-1-5-21-1", elevated=False, pid=0):
     return Client(pid, "", sid=sid, elevated=elevated)
 
 
+def test_foreign_journal_mutations_denied(core, stores):
+    from recovery import threatlog
+    rid = core.handle(user("A"), "threats.add", {"path": "same", "level": "suspicious", "text": "x"})
+    for op, args in [
+        ("threats.dismiss", {"id": rid}),
+        ("threats.set_status", {"id": rid, "status": threatlog.DISMISSED}),
+        ("threats.mark_path", {"path": "same", "status": threatlog.DISMISSED})]:
+        with pytest.raises(PermissionError):
+            core.handle(user("B"), op, args)
+    assert threatlog.get(rid)["status"] == threatlog.FOUND
+    core.handle(user("A"), "threats.dismiss", {"id": rid})
+    assert threatlog.get(rid)["status"] == threatlog.DISMISSED
+
+
+def test_quarantine_owner_checked_before_restore_or_delete(core, stores):
+    import io
+    import quarantine
+    qid = quarantine.quarantine_stream(io.BytesIO(b"private"), "C:/private", "test", sid="A")
+    legacy = quarantine.quarantine_stream(io.BytesIO(b"old"), "C:/old", "test")
+    assert [m["id"] for m in core.handle(user("A"), "quarantine.list", {})] == [qid]
+    assert core.handle(user("B"), "quarantine.list", {}) == []
+    for op, args in [("quarantine.restore", {"id": qid, "handle": 0}),
+                     ("quarantine.delete", {"id": qid}),
+                     ("quarantine.delete", {"id": legacy})]:
+        with pytest.raises(PermissionError):
+            core.handle(user("B"), op, args)
+    assert len(core.handle(user(elevated=True), "quarantine.list", {})) == 2
+
+
+def test_profile_without_load_time_is_kept(tmp_path, monkeypatch):
+    import winreg
+    from service import core as svc_core
+    home = tmp_path / "profile"
+    home.mkdir()
+    class Key:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a: Key())
+    def enum(key, index):
+        if index == 0:
+            return "S-1-5-21-test"
+        raise OSError("end")
+    def query(key, name):
+        if name == "ProfileImagePath":
+            return str(home), 1
+        raise FileNotFoundError(name)
+    monkeypatch.setattr(winreg, "EnumKey", enum)
+    monkeypatch.setattr(winreg, "QueryValueEx", query)
+    assert svc_core.profiles_by_recency() == [(home, 0)]
+
+
 def test_ops_have_handlers_and_rights(core):
     for op, level in protocol.OPS.items():
         assert level in (protocol.READ, protocol.CONTROL, protocol.WEAKEN, protocol.ADMIN)

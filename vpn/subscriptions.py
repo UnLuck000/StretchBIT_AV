@@ -9,10 +9,10 @@ subscriptions.dat под DPAPI рядом с профилями: в ссылке
 """
 import base64
 import binascii
-import ipaddress
 import json
 import re
 import time
+import public_http
 import urllib.parse
 import urllib.request
 import uuid
@@ -28,20 +28,7 @@ MAX_SIZE = 4 * 1024 * 1024
 def _blocked(url: str) -> str:
     """Причина, по которой адрес подписки нельзя открывать, или '' — можно. Редирект не
     должен уводить с https или в локальную/приватную сеть."""
-    parts = urllib.parse.urlsplit(url)
-    scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
-    if scheme != "https":
-        return f"схема {scheme or 'пусто'}"
-    if host in ("localhost",) or host.endswith(".local") or host.endswith(".localhost"):
-        return "локальный адрес"
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return ""  # имя: IP не проверить, но localhost выше уже отсечён
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast \
-            or ip.is_reserved or ip.is_unspecified:
-        return "локальный или приватный адрес"
-    return ""
+    return public_http.blocked_url(url, https_only=True)
 
 
 class _SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -140,8 +127,11 @@ def parse_links(data: bytes) -> tuple[list[str], int]:
 
 def fetch(sub: Subscription, timeout: float = 30.0) -> tuple[list[str], int, dict]:
     """Скачать подписку (без прокси из переменных окружения): (ссылки, пропущено, сведения)."""
+    reason = _blocked(sub.url)
+    if reason:
+        raise ValueError(f"небезопасный адрес подписки ({reason})")
     request = urllib.request.Request(sub.url, headers={"User-Agent": "StretchBIT/1.0 (v2ray)"})
-    opener = urllib.request.build_opener(_SafeRedirect(), urllib.request.ProxyHandler({}))
+    opener = public_http.opener(_SafeRedirect())
     with opener.open(request, timeout=timeout) as response:
         data = response.read(MAX_SIZE + 1)
         info = parse_info(response.headers.get("Subscription-Userinfo", ""))

@@ -143,6 +143,7 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r *S-
 ; служба защиты: создать или обновить (путь, автозапуск, перезапуск при сбое) и запустить
 Filename: "{app}\{#ExeName}"; Parameters: "--service-install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Устанавливаю службу защиты..."
 Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: autostart; StatusMsg: "Включаю автозапуск..."
+Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart off"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: not autostart; StatusMsg: "Настраиваю возврат сети после VPN..."
 Filename: "{app}\{#ExeName}"; Description: "Запустить {#DisplayName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
