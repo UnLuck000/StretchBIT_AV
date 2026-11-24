@@ -1,10 +1,5 @@
 {
   "confirm": {
-    "APT30_Sample_29": {
-      "added_at": "2026-11-24T20:17:09",
-      "note": "детект упаковщика (UPX/Themida/ASPack), а не семьи: срабатывает на любом упакованном",
-      "source": "signature-base"
-    },
     "ASPack_ASPACK": {
       "added_at": "2026-11-24T20:17:09",
       "note": "детект упаковщика (UPX/Themida/ASPack), а не семьи: срабатывает на любом упакованном",
@@ -24,11 +19,6 @@
       "added_at": "2026-11-15T14:53:24",
       "note": "ложное: настоящий System.Web.dll (.NET, Unity Mono) содержит MachineKeySection и HttpContext",
       "source": "bartblaze"
-    },
-    "IMPLANT_11_v12": {
-      "added_at": "2026-11-24T20:17:09",
-      "note": "короткий hex-паттерн (1-3 байта): случайные совпадения на чистых файлах",
-      "source": "signature-base"
     },
     "Impacket": {
       "added_at": "2026-11-15T14:53:24",
@@ -50,11 +40,6 @@
       "note": "короткий hex-паттерн (1-3 байта): случайные совпадения на чистых файлах",
       "source": "bartblaze"
     },
-    "ProPort_zip_Folder_ProPort": {
-      "added_at": "2026-11-24T20:17:09",
-      "note": "детект упаковщика (UPX/Themida/ASPack), а не семьи: срабатывает на любом упакованном",
-      "source": "signature-base"
-    },
     "SUSP_HxD_Icon_Anomaly_May23_1": {
       "added_at": "2026-11-24T20:17:09",
       "note": "детект упаковщика (UPX/Themida/ASPack), а не семьи: срабатывает на любом упакованном",
@@ -64,11 +49,6 @@
       "added_at": "2026-11-24T20:17:09",
       "note": "детект упаковщика (UPX/Themida/ASPack), а не семьи: срабатывает на любом упакованном",
       "source": "signature-base"
-    },
-    "Webshell_in_image": {
-      "added_at": "2026-11-24T20:17:09",
-      "note": "короткий hex-паттерн (1-3 байта): случайные совпадения на чистых файлах",
-      "source": "bartblaze"
     },
     "WinDivert_Driver": {
       "added_at": "2026-11-15T15:43:42",
@@ -89,11 +69,6 @@
       "added_at": "2026-11-15T15:43:42",
       "note": "WinDivert (zapret, pydivert, своя копия программы): законный драйвер перехвата пакетов — только подтверждает другие находки",
       "source": "elastic"
-    },
-    "glassRAT": {
-      "added_at": "2026-11-24T20:17:09",
-      "note": "короткий hex-паттерн (1-3 байта): случайные совпадения на чистых файлах",
-      "source": "signature-base"
     },
     "redSails_EXE": {
       "added_at": "2026-11-15T15:43:42",
