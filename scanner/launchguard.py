@@ -11,10 +11,9 @@
    запуск того же файла — ответ из кэша вердиктов без чтения файла).
 2. Пока файл проверяется, процесс приостановлен (если файл не из папки Windows, не крупнее
    SUSPEND_LIMIT и его вердикта ещё нет в кэше): вредоносный код не успеет выполниться.
-3. Угроза (хэш, правило YARA) — процесс и его дочерние процессы завершаются (_kill_tree;
-   ВРЕМЕННО ЗАКОММЕНТИРОВАНО в _check_new: пока только уведомление, процесс продолжает
-   работу), файл можно вручную отправить в карантин. Подозрительное (эвристика) —
-   процесс продолжает работу, но о нём сообщается.
+3. Угроза (хэш, сильное правило YARA) — процесс и его дочерние процессы завершаются
+   (_kill_tree), файл автоматически в карантин (кроме системных из папки Windows).
+   Подозрительное (эвристика) — процесс продолжает работу, но о нём сообщается.
 4. Интерпретаторы скриптов (powershell, wscript, mshta...): проверяется и файл скрипта из
    командной строки, закодированная команда PowerShell (-enc) — подозрительна.
 5. Цепочки «документ → оболочка» (Word запускает PowerShell, Excel — cmd) — подозрительны:
@@ -382,12 +381,15 @@ class LaunchGuard:
             for target in targets:
                 level, text = classify(verdicts.get(target))
                 if level == "threat":
-                    # экстренное завершение: только уровень «угроза» (хэш или правило
-                    # вредоноса у неподписанного файла); в карантин — вручную из журнала
+                    # экстренное завершение уровня «угроза» (хэш или правило вредоноса у
+                    # неподписанного файла): процесс и его потомки завершаются, файл — в
+                    # карантин (кроме системных из папки Windows)
                     killed = _kill_tree(pid)
                     self.blocked += killed
+                    quarantined = _quarantine_threat(target, text)
                     self._emit("blocked", {"pid": pid, "name": name, "exe": target,
                                            "text": text, "killed": killed,
+                                           "quarantined": quarantined,
                                            "parent": parent})
                     return
                 if level == "suspicious":
@@ -481,6 +483,19 @@ def _kill_tree(pid: int) -> bool:
             swallowed("launchguard: завершение дочернего процесса")
     try:
         proc.kill()
+        return True
+    except Exception:
+        return False
+
+
+def _quarantine_threat(path: str, reason: str) -> bool:
+    """Файл угрозы — в карантин (автокарантин уровня «угроза»). Системные файлы из папки
+    Windows не трогаем. False — не удалось (файл занят, нет прав, системный)."""
+    if os.path.normcase(path).startswith(windows_dir()):
+        return False
+    try:
+        from quarantine import quarantine_file
+        quarantine_file(Path(path), reason=reason)
         return True
     except Exception:
         return False

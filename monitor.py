@@ -7,7 +7,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
-from scanner.engine import check_file
+from scanner.engine import check_file, reason_level
 from scanner.hashing import load_all_signatures
 from scanner.whitelist import trusted_hashes
 from processmanager.memscan import shared_rules
@@ -114,11 +114,37 @@ class _Handler(FileSystemEventHandler):
 
 
 def auto_quarantine(path, reason: str) -> bool:
-    """Сразу в карантин: совпадение хэша, файл не из папки Windows."""
-    if not (reason or "").startswith("hash match"):
+    """Сразу в карантин: уровень «угроза» (хэш в базе или сильное правило YARA), файл не из
+    папки Windows. «Подозрительное» (эвристика, слабые YARA, PUA/HackTool, уязвимые драйверы,
+    расширения) не карантинится — только сообщение в журнале защиты."""
+    if not reason or reason_level(reason) != "threat":
         return False
     windows = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows")) + os.sep
     return not os.path.normcase(str(path)).startswith(windows)
+
+
+def _kill_processes(path) -> int:
+    """Завершает процессы, запущенные из файла path (вместе с дочерними). Возвращает, сколько
+    завершено (0 — никого или сбой). Нужно, чтобы карантин мог удалить запущенный файл и чтобы
+    вредонос не продолжал работать."""
+    from processmanager import ntsnap
+    from scanner.launchguard import _kill_tree
+    target = os.path.normcase(str(path))
+    killed = 0
+    try:
+        procs = ntsnap.list_processes()
+    except OSError:
+        return 0
+    for p in procs:
+        if p.pid in (0, 4):
+            continue
+        try:
+            exe, _ = ntsnap.identity(p.pid)
+        except OSError:
+            continue
+        if exe and os.path.normcase(exe) == target and _kill_tree(p.pid):
+            killed += 1
+    return killed
 
 
 class RealtimeMonitor:
@@ -331,14 +357,17 @@ class RealtimeMonitor:
             self._emit("scanned", f"OK: {path}")
             return
 
-        # Автокарантин — только по совпадению хэша (самый надёжный слой) и не в папке
-        # Windows: ложное срабатывание не должно убрать системный файл. Правила YARA и
-        # эвристика — пока только сообщение, в карантин вручную из журнала защиты.
+        # Автокарантин уровня «угроза» (хэш или сильное правило YARA) и не в папке Windows:
+        # сначала завершаем запущенный из файла процесс (иначе файл занят и не удалится),
+        # затем сам файл в карантин. «Подозрительное» — только сообщение, в карантин вручную.
         if auto_quarantine(path, reason):
+            killed = _kill_processes(path)
             try:
                 from quarantine import quarantine_file
                 quarantine_file(path, reason=reason)
-                self._emit("threat", f"{path}\t{reason}\tперемещён в карантин")
+                action = "перемещён в карантин" + \
+                    (f", процесс завершён ({killed})" if killed else "")
+                self._emit("threat", f"{path}\t{reason}\t{action}")
             except OSError as e:
                 self._emit("threat", f"{path}\t{reason}\tне удалось изолировать: {e}")
             return

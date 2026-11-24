@@ -23,6 +23,7 @@ from quarantine import QUARANTINE_DIR
 from recovery import activity, threatlog
 from ui import access, settings as cfg
 import appinfo
+import datadirs
 from mainwindow.common import DEFAULT_WATCH, ID_ROLE, RULES_DIR, SIGNATURES, _dlog
 
 
@@ -996,7 +997,10 @@ class ProtectionMixin:
             folders,
             sig_dir=SIGNATURES.parent,
             rules_dir=RULES_DIR,
-            exclude=[QUARANTINE_DIR, SIGNATURES.parent.resolve()],
+            # собственная папка программы (logs/, reports/, cache/, карантин, базы) не
+            # проверяется: в журналах и отчётах лежат названия YARA-правил прошлых находок,
+            # и правила совпадают сами с собой — защита зацикливалась бы на своих же файлах
+            exclude=[QUARANTINE_DIR, SIGNATURES.parent.resolve(), datadirs.ROOT],
             on_event=lambda kind, text: self.bridge.event.emit(kind, text),
         )
         self.monitor.start()

@@ -415,7 +415,10 @@ class FalsePositiveWindow(QMainWindow):
 
     def refresh_excluded(self):
         self.excluded.clear()
-        data = overrides.load()
+        # только свои исключения этого пользователя (overrides.json): глобальные исключения
+        # разработчика (signatures/release_overrides.json) работают поверх баз, но скрыты —
+        # как и release_exclusions.json (драйверы, программы, мониторинг сети)
+        data = overrides.read_file(overrides.OVERRIDES_FILE)
         for digest, info in data["hashes"].items():
             item = QTreeWidgetItem(["Хэш", digest, info.get("source", ""), info.get("path", ""),
                                     info.get("added_at", "").replace("T", " ")])

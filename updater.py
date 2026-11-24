@@ -461,12 +461,12 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
     try:
         last = _virusshare_last(hint)
     except Exception as e:
-        print(f"VirusShare: сайт недоступен: {_error(e)}")
-        return False
+        print(f"VirusShare: сайт недоступен ({_error(e)}), пробую зеркало")
+        return _virusshare_from_mirror(files, progress, part)
     if last is None:
         print(f"VirusShare: последний список не найден около {hint} — "
-              "сайт сменил нумерацию или не отвечает")
-        return False
+              "сайт сменил нумерацию или не отвечает; пробую зеркало")
+        return _virusshare_from_mirror(files, progress, part)
     if progress:
         progress(f"VirusShare: последний список {last}")
     wanted = list(range(last, max(-1, last - files), -1))
@@ -505,6 +505,48 @@ def update_virusshare(files: int = VIRUSSHARE_FILES, progress=None, part=None) -
     else:
         print(f"VirusShare: списков скачано {loaded}"
               + (f", с ошибкой {failed}" if failed else "") + f", MD5 всего {total}")
+    return failed < len(missing) or not missing
+
+
+def _virusshare_from_mirror(files: int, progress, part) -> bool:
+    """VirusShare из зеркала (ветка feeds): прямое обращение к virusshare.com у конечных
+    пользователей часто отваливается по таймауту. Списки те же, что и прямые, только с
+    raw.githubusercontent.com. Состояние (последний номер) пишется в virusshare.json."""
+    try:
+        manifest = _mirror_manifest()
+    except MirrorError as e:
+        print(f"VirusShare: зеркало недоступно: {e}")
+        return False
+    lists = {int(m.group(1)): key for key in manifest["files"]
+             if (m := re.match(r"virusshare_(\d+)$", key))}
+    if not lists:
+        print("VirusShare: в зеркале нет списков (задание зеркала не скачало)")
+        return False
+    last = max(lists)
+    wanted = list(range(last, max(-1, last - files), -1))
+    FEEDS_DIR.mkdir(parents=True, exist_ok=True)
+    have = {int(m.group(1)) for p in FEEDS_DIR.glob("virusshare_*.md5.bin")
+            if (m := re.match(r"virusshare_(\d+)\.md5\.bin$", p.name))}
+    missing = [n for n in wanted if n not in have and n in lists]
+    loaded, failed = 0, 0
+    for i, n in enumerate(missing, 1):
+        if progress:
+            progress(f"VirusShare (зеркало): список {i} из {len(missing)}")
+        if part:
+            part((i - 1) / len(missing))
+        try:
+            raw = mirror_file(lists[n])
+            data = md5_bin(raw)
+        except Exception as e:
+            failed += 1
+            print(f"VirusShare (зеркало) {n:05d}: {_error(e)}")
+            continue
+        _write_atomic(FEEDS_DIR / f"virusshare_{n:05d}.md5.bin", data)
+        loaded += 1
+    _write_atomic(FEEDS_DIR / "virusshare.json", json.dumps({"last": last}))
+    total = sum(p.stat().st_size // 16 for p in FEEDS_DIR.glob("virusshare_*.md5.bin"))
+    print(f"VirusShare (зеркало): списков скачано {loaded}"
+          + (f", с ошибкой {failed}" if failed else "") + f", MD5 всего {total}")
     return failed < len(missing) or not missing
 
 

@@ -88,6 +88,22 @@ def test_monitor_filters_system_folders(tmp_path):
     assert not mon._wanted(user / "file.crdownload")
 
 
+def test_monitor_skips_excluded_folder(tmp_path):
+    """Собственная папка программы (exclude) не проверяется: файлы внутри не сканируются.
+
+    В журналах и отчётах программы лежат названия YARA-правил прошлых находок, и правила
+    совпадают сами с собой — без исключения защита зацикливалась бы на своих же файлах."""
+    events = []
+    own = tmp_path / "own"
+    log = own / "logs" / "app.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("SharpAdidnsdump", encoding="utf-8")
+    mon = RealtimeMonitor([tmp_path / "user"], tmp_path, tmp_path, [own],
+                          lambda kind, text: events.append((kind, text)))
+    mon._handle(log, 0)
+    assert events == []  # ни «OK», ни «угроза»: файл в собственной папке пропущен
+
+
 def test_memory_batches_join_small_regions():
     regions = [(i, b"a" * 1000) for i in range(10)] + [(99, b"b" * memscan.BATCH)]
     blocks = sorted(memscan._batches(regions), key=len)
@@ -179,6 +195,33 @@ def test_virusshare_nothing_new_says_all_present(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(updater, "_virusshare_last", lambda hint: 505)
     assert updater.update_virusshare(files=2) is True
     assert "все списки на месте" in capsys.readouterr().out
+
+
+def test_virusshare_from_mirror(tmp_path, monkeypatch, capsys):
+    """Фолбэк на зеркало: списки берутся из manifest ветки feeds и пишутся как md5.bin."""
+    import json
+    monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
+    raw = b"0123456789abcdef0123456789abcdef\n"
+    manifest = {"version": updater.MIRROR_MANIFEST_VERSION, "generated": 0,
+                "files": {f"virusshare_{n:05d}": {"name": f"virusshare_{n:05d}-202601010000.md5.gz",
+                                                  "sha256": "x", "size": len(raw)}
+                          for n in (510, 511)}}
+    monkeypatch.setattr(updater, "_mirror_manifest", lambda: manifest)
+    monkeypatch.setattr(updater, "mirror_file", lambda key: raw)
+    assert updater._virusshare_from_mirror(2, None, None) is True
+    assert len(list((tmp_path / "feeds").glob("virusshare_*.md5.bin"))) == 2
+    assert json.loads((tmp_path / "feeds" / "virusshare.json").read_text()) == {"last": 511}
+
+
+def test_virusshare_falls_back_to_mirror_on_timeout(tmp_path, monkeypatch, capsys):
+    """Сайт virusshare.com не отвечает — update_virusshare уходит в зеркало."""
+    monkeypatch.setattr(updater, "FEEDS_DIR", tmp_path / "feeds")
+    monkeypatch.setattr(updater, "_virusshare_last",
+                        lambda hint: (_ for _ in ()).throw(TimeoutError("read timed out")))
+    monkeypatch.setattr(updater, "_virusshare_from_mirror",
+                        lambda files, progress, part: True)
+    assert updater.update_virusshare() is True
+    assert "пробую зеркало" in capsys.readouterr().out
 
 
 def test_read_limited_rejects_oversized():

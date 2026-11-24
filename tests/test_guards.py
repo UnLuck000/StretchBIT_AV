@@ -43,7 +43,8 @@ def test_script_rules(tmp_path):
 
 
 def test_threat_is_killed(monkeypatch, tmp_path):
-    """Экстренное завершение: процесс с угрозой завершается вместе с дочерними."""
+    """Экстренное завершение: процесс с угрозой завершается вместе с дочерними, файл — в
+    карантин."""
     exe = tmp_path / "evil.exe"
     exe.write_bytes(b"MZ" + b"\0" * 100)
     events, resumed = [], []
@@ -53,11 +54,27 @@ def test_threat_is_killed(monkeypatch, tmp_path):
     monkeypatch.setattr(guard, "_verdict", lambda paths: {p: "YARA: Evil_Test" for p in paths})
     monkeypatch.setattr(launchguard, "_suspend", lambda pid: True)
     monkeypatch.setattr(launchguard, "_resume", lambda pid: resumed.append(pid))
-    killed = []
+    killed, quarantined = [], []
     monkeypatch.setattr(launchguard, "_kill_tree", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(launchguard, "_quarantine_threat",
+                        lambda path, reason: quarantined.append(path) or True)
     guard._check_new(1234, 1, str(exe), [])
     assert events[0][0] == "blocked" and events[0][1]["killed"] is True
-    assert killed == [1234]
+    assert events[0][1]["quarantined"] is True
+    assert killed == [1234] and quarantined == [str(exe)]
+
+
+def test_quarantine_threat_skips_windows(monkeypatch):
+    """Автокарантин не трогает системные файлы из папки Windows."""
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    import quarantine
+    called = []
+    monkeypatch.setattr(quarantine, "quarantine_file",
+                        lambda path, reason: called.append(str(path)) or "id")
+    assert launchguard._quarantine_threat(r"C:\Windows\System32\x.dll", "hash match") is False
+    assert called == []
+    assert launchguard._quarantine_threat(r"C:\Users\u\Downloads\x.exe", "hash match") is True
+    assert called == [r"C:\Users\u\Downloads\x.exe"]
 
 
 # ---------- стилеры ----------

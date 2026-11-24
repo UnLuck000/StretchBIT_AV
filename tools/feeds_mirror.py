@@ -84,6 +84,109 @@ SOURCES = {
     "ja3": ("csv", False, lambda key: _download(SSLBL_JA3), _expect("ja3_md5")),
 }
 
+# VirusShare: списки MD5 (по 131 072 хэша в файле). У конечных пользователей virusshare.com
+# отдаёт ответы очень медленно (таймауты в updater.py), поэтому зеркалим и их. Списки статичны:
+# прежние файлы переиспользуются, качаются только новые номера.
+VIRUSSHARE_URL = "https://virusshare.com/hashfiles/VirusShare_{n:05d}.md5"
+VIRUSSHARE_FILES = 50       # сколько последних списков держать
+VIRUSSHARE_FIRST_GUESS = 505
+VIRUSSHARE_PROBES = 12      # HEAD-запросов на поиск последнего номера
+VIRUSSHARE_SPAN = 64        # дальше этого от подсказки номер не ищем
+VIRUSSHARE_TIMEOUT = 120    # с: virusshare.com медленный
+
+
+def _virusshare_exists(n: int) -> bool:
+    req = urllib.request.Request(VIRUSSHARE_URL.format(n=n), method="HEAD",
+                                 headers={"User-Agent": "StretchBIT-feeds-mirror/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=VIRUSSHARE_TIMEOUT):
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise
+
+
+def _virusshare_last(hint: int) -> int | None:
+    """Номер последнего списка: от подсказки вверх удвоением и двоичным поиском."""
+    used = [0]
+
+    def exists(n: int) -> bool:
+        used[0] += 1
+        return _virusshare_exists(n)
+
+    def left() -> bool:
+        return used[0] < VIRUSSHARE_PROBES
+
+    n = max(0, hint)
+    found = exists(n)
+    down = 0
+    while not found and n > 0 and down < VIRUSSHARE_SPAN and left():
+        n -= 1
+        down += 1
+        found = exists(n)
+    if not found:
+        return None
+    step = 1
+    hi = None
+    while left() and step <= VIRUSSHARE_SPAN:
+        if not exists(n + step):
+            hi = n + step
+            break
+        n += step
+        step *= 2
+    if hi is None:
+        hi = n + step
+    while hi - n > 1 and left():
+        mid = (n + hi) // 2
+        if exists(mid):
+            n = mid
+        else:
+            hi = mid
+    return n
+
+
+def _mirror_virusshare(out: Path, previous: Path | None, prev_files: dict, stamp: str,
+                       errors: dict) -> dict:
+    """VirusShare в manifest: {virusshare_NNNNN: {name, sha256, size}}. Прежние файлы (списки
+    статичны) переносятся как есть, докачиваются только новые."""
+    result = {}
+    prev = {}
+    for key, info in prev_files.items():
+        m = re.match(r"virusshare_(\d+)", key)
+        if not m:
+            continue
+        name = str(info.get("name", ""))
+        src = previous / name if previous is not None and name else None
+        if src is not None and src.exists():
+            (out / name).write_bytes(src.read_bytes())
+            prev[int(m.group(1))] = info
+    hint = max(prev) if prev else VIRUSSHARE_FIRST_GUESS
+    try:
+        last = _virusshare_last(hint)
+    except Exception as e:  # noqa: BLE001 — сайт может быть недоступен
+        errors["virusshare"] = type(e).__name__
+        return result
+    if last is None:
+        errors["virusshare"] = "последний список не найден"
+        return result
+    for n in range(last, max(-1, last - VIRUSSHARE_FILES), -1):
+        key = f"virusshare_{n:05d}"
+        if n in prev:
+            result[key] = prev[n]
+            continue
+        try:
+            raw = _download(VIRUSSHARE_URL.format(n=n), timeout=VIRUSSHARE_TIMEOUT)
+        except Exception as e:  # noqa: BLE001
+            errors[key] = type(e).__name__
+            continue
+        packed = gzip.compress(raw, compresslevel=9, mtime=0)
+        name = f"{key}-{stamp}.md5.gz"
+        (out / name).write_bytes(packed)
+        result[key] = {"name": name, "sha256": hashlib.sha256(packed).hexdigest(),
+                       "size": len(raw)}
+    return result
+
 
 def build(out: Path, key: str, sources: dict | None = None, now: float | None = None,
           previous: Path | None = None) -> dict:
@@ -128,6 +231,8 @@ def build(out: Path, key: str, sources: dict | None = None, now: float | None = 
         (out / name).write_bytes(packed)
         manifest["files"][kind] = {"name": name, "sha256": hashlib.sha256(packed).hexdigest(),
                                    "size": len(raw)}
+    manifest["files"].update(_mirror_virusshare(out, previous, prev_files, stamp,
+                                                manifest["errors"]))
     sums = "".join(f"{v['sha256']}  {v['name']}\n" for v in manifest["files"].values())
     (out / "SHA256SUMS").write_text(sums, encoding="utf-8")
     sign_key = os.environ.get("FEEDS_SIGN_KEY", "").strip()

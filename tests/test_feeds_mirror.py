@@ -28,6 +28,13 @@ SSLBL_RAW = b"# SSLBL\n5.6.7.8\n"
 JA3_RAW = b"# ja3_md5,firstseen,lastseen,Listingreason\n" + b"c" * 32 + b",a,b,Evil\n"
 
 
+@pytest.fixture(autouse=True)
+def _virusshare_offline(monkeypatch):
+    """VirusShare в тестах не трогает сеть: пробу последнего номера глушим (None — сайт не
+    отвечает). Отдельный тест ниже проверяет само зеркалирование с подменой загрузки."""
+    monkeypatch.setattr(feeds_mirror, "_virusshare_last", lambda hint: None)
+
+
 def fake_sources(fail=()):
     def make(raw, kind):
         def fetch(key):
@@ -45,7 +52,8 @@ def fake_sources(fail=()):
 def test_build_writes_manifest_and_hides_key(tmp_path):
     manifest = feeds_mirror.build(tmp_path, KEY, fake_sources(fail=("urlhaus",)))
     assert set(manifest["files"]) == {"malwarebazaar", "threatfox", "feodo", "sslbl", "ja3"}
-    assert manifest["errors"] == {"urlhaus": "TimeoutError"}
+    assert manifest["errors"]["urlhaus"] == "TimeoutError"
+    assert manifest["errors"]["virusshare"] == "последний список не найден"
     for info in manifest["files"].values():
         packed = (tmp_path / info["name"]).read_bytes()
         assert hashlib.sha256(packed).hexdigest() == info["sha256"]
@@ -78,6 +86,26 @@ def test_build_keeps_previous_file_when_source_fails(tmp_path):
     assert manifest["files"]["threatfox"]["name"] == first["files"]["threatfox"]["name"]
     packed = (out2 / manifest["files"]["threatfox"]["name"]).read_bytes()
     assert hashlib.sha256(packed).hexdigest() == manifest["files"]["threatfox"]["sha256"]
+
+
+def test_mirror_virusshare_lists(tmp_path, monkeypatch):
+    """VirusShare зеркалится по спискам (50 последних), файлы сжаты и внесены в manifest."""
+    raw = b"0123456789abcdef0123456789abcdef\n"
+    monkeypatch.setattr(feeds_mirror, "_virusshare_last", lambda hint: 511)
+    calls = []
+
+    def download(url, timeout=300):
+        calls.append(url)
+        return raw
+
+    monkeypatch.setattr(feeds_mirror, "_download", download)
+    files = feeds_mirror._mirror_virusshare(tmp_path, None, {}, "202601010000", {})
+    assert set(files) == {f"virusshare_{n:05d}" for n in range(511, 461, -1)}
+    assert len(calls) == 50
+    info = files["virusshare_00511"]
+    packed = (tmp_path / info["name"]).read_bytes()
+    assert hashlib.sha256(packed).hexdigest() == info["sha256"]
+    assert gzip.decompress(packed) == raw
 
 
 @pytest.fixture

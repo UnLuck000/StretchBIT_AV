@@ -176,14 +176,15 @@ def test_new_password_uses_pbkdf2_and_old_still_works(tmp_path):
 
 
 # ---------- автокарантин и ярлыки ----------
-def test_auto_quarantine_only_by_hash_outside_windows(monkeypatch):
+def test_auto_quarantine_threat_outside_windows(monkeypatch):
     import monitor
     monkeypatch.setenv("SystemRoot", r"C:\Windows")
     assert monitor.auto_quarantine(r"C:\Users\u\Downloads\x.exe", "hash match")
     assert monitor.auto_quarantine(r"D:\x.exe", "hash match (MD5)")
-    assert not monitor.auto_quarantine(r"C:\Users\u\x.exe", "YARA: Some_Rule")
+    assert monitor.auto_quarantine(r"C:\Users\u\x.exe", "YARA: Some_Rule")   # сильное правило
+    assert not monitor.auto_quarantine(r"C:\Users\u\x.exe", "YARA (слабое): Tool_Rule")
     assert not monitor.auto_quarantine(r"C:\Users\u\x.exe", "Heuristic: 80")
-    assert not monitor.auto_quarantine(r"C:\Windows\System32\x.dll", "hash match")
+    assert not monitor.auto_quarantine(r"C:\Windows\System32\x.dll", "hash match")  # система
 
 
 def test_launcher_shortcut_is_not_a_threat(tmp_path, monkeypatch):
