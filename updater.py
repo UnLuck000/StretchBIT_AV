@@ -99,10 +99,7 @@ MIRROR_BRANCH = "feeds"
 MIRROR_MAX_AGE = 3 * 86400      # старше — задание зеркала сломано: не берём, идём напрямую
 MIRROR_MAX_SIZE = 512 * 2**20   # распакованный файл зеркала — не больше (защита от gzip-бомбы)
 MIRROR_MANIFEST_VERSION = 1
-# Публичный ключ подписи манифеста баз (Ed25519, 64 hex-символа). Генерируется
-# tools/feeds_keygen.py; закрытый ключ — только в Secrets GitHub Actions (FEEDS_SIGN_KEY).
-# Пусто — зеркало недоступно; прямые источники остаются доступны. Перед выпуском задать ключ.
-FEEDS_PUBLIC_KEY = ""
+FEEDS_PUBLIC_KEY = "621731fd27c061f818b84574bdd8f2ca833d44d57f15af9658b39b8b19ec5c7a"
 
 
 # ---------- общее ----------
