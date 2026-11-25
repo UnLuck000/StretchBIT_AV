@@ -268,6 +268,8 @@ def make_editions() -> dict[str, Path]:
 def make_zip(folder: Path) -> Path:
     # Текст виден рядом с EXE ещё до запуска; рабочая копия для диалога лежит в app/docs.
     shutil.copy2(ROOT / "docs" / "EULA.txt", folder / "EULA.txt")
+    shutil.copy2(ROOT / "LICENSE", folder / "LICENSE")
+    shutil.copy2(ROOT / "docs" / "PRIVACY.txt", folder / "PRIVACY.txt")
     out = ROOT / "release" / f"{folder.name}-{appinfo.VERSION}"
     out.parent.mkdir(exist_ok=True)
     return Path(shutil.make_archive(str(out), "zip", folder.parent, folder.name))

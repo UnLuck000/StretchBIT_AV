@@ -30,11 +30,43 @@ def test_eula_acceptance_is_bound_to_full_text(tmp_path, monkeypatch):
     assert not consent.accepted()
 
 
+def test_license_and_privacy_changes_require_new_acknowledgment(tmp_path, monkeypatch):
+    for name, attr in (("LICENSE", "LICENSE_FILE"), ("EULA.txt", "EULA_FILE"),
+                       ("PRIVACY.txt", "PRIVACY_FILE")):
+        path = tmp_path / name
+        path.write_text(name, encoding="utf-8")
+        monkeypatch.setattr(consent, attr, path)
+    consent.accept()
+    assert consent.accepted()
+    consent.PRIVACY_FILE.write_text("new policy", encoding="utf-8")
+    assert not consent.accepted()
+    consent.accept()
+    consent.LICENSE_FILE.write_text("changed license", encoding="utf-8")
+    assert not consent.accepted()
+
+
+def test_mit_notice_and_permissions_are_not_overridden_by_eula():
+    root = Path(__file__).resolve().parent.parent
+    license_text = (root / "LICENSE").read_text(encoding="utf-8")
+    eula = (root / "docs" / "EULA.txt").read_text(encoding="utf-8")
+    assert "Copyright (c) 2026 VOVAN" in license_text
+    assert "sublicense, and/or sell" in license_text
+    assert "included in all" in license_text
+    assert "не требуется" in eula
+    assert "При расхождении действует MIT" in eula
+    assert "не являются дополнительными" in eula
+    assert "Принятие этого соглашения включает согласие на передачу" not in eula
+    spec = (root / "StretchBIT.spec").read_text(encoding="utf-8")
+    assert 'ROOT / "LICENSE"' in spec and 'ROOT / "docs" / "PRIVACY.txt"' in spec
+
+
 def test_eula_requires_an_explicit_checkbox(app):
     from ui.eula import EulaDialog
     dialog = EulaDialog()
     assert not dialog.accept_button.isEnabled()
-    assert "ОБЯЗАТЕЛЬНАЯ МИНИМАЛЬНАЯ ДИАГНОСТИКА" in dialog.body.toPlainText()
+    assert "MIT License" in dialog.body.toPlainText()
+    assert "ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ" in dialog.body.toPlainText()
+    assert "обязательную" not in dialog.checkbox.text()
     dialog.checkbox.setChecked(True)
     assert dialog.accept_button.isEnabled()
 
@@ -73,7 +105,7 @@ def test_eula_guard_precedes_registration_and_main_window():
     assert main.index("if not ensure_accepted():") < main.index("window = MainWindow()")
     spec = (root / "StretchBIT.spec").read_text(encoding="utf-8")
     assert '"EULA.txt"), "docs"' in spec
-    assert "LicenseFile=docs\\EULA.txt" in (root / "installer.iss").read_text(encoding="utf-8")
+    assert "LicenseFile=LICENSE" in (root / "installer.iss").read_text(encoding="utf-8")
 
 
 def test_known_file_name_replaced_with_content_hash(tmp_path):
@@ -307,6 +339,8 @@ def test_zip_contains_readable_eula_next_to_exe(tmp_path, monkeypatch):
     root = tmp_path / "project"
     (root / "docs").mkdir(parents=True)
     (root / "docs" / "EULA.txt").write_text("TEST EULA", encoding="utf-8")
+    (root / "docs" / "PRIVACY.txt").write_text("TEST PRIVACY", encoding="utf-8")
+    (root / "LICENSE").write_text("TEST MIT", encoding="utf-8")
     folder = root / "dist" / "StretchBIT"
     folder.mkdir(parents=True)
     (folder / "StretchBIT.exe").write_bytes(b"not executable")
@@ -314,3 +348,5 @@ def test_zip_contains_readable_eula_next_to_exe(tmp_path, monkeypatch):
     archive = build_release.make_zip(folder)
     with zipfile.ZipFile(archive) as z:
         assert z.read("StretchBIT/EULA.txt").decode("utf-8") == "TEST EULA"
+        assert z.read("StretchBIT/LICENSE").decode("utf-8") == "TEST MIT"
+        assert z.read("StretchBIT/PRIVACY.txt").decode("utf-8") == "TEST PRIVACY"

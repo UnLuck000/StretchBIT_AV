@@ -96,8 +96,9 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=no
-; лицензионное соглашение (заглушка — текст позже): «Далее» неактивно, пока не принято
-LicenseFile=docs\EULA.txt
+; Авторский код — MIT; политика показывается до лицензии. Отправки диагностики пока нет.
+InfoBeforeFile=docs\PRIVACY.txt
+LicenseFile=LICENSE
 
 [Languages]
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"

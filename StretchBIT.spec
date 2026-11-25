@@ -15,7 +15,9 @@ sys.path.insert(0, str(ROOT))
 import appinfo  # noqa: E402
 
 datas = [
+    (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "docs" / "EULA.txt"), "docs"),
+    (str(ROOT / "docs" / "PRIVACY.txt"), "docs"),
     (str(ROOT / "ui" / "designer"), "ui/designer"),
     (str(ROOT / "ui" / "assets"), "ui/assets"),
     (str(ROOT / "signatures" / "release_exclusions.json"), "signatures"),
