@@ -2,10 +2,10 @@ APP_NAME = "StretchBIT"
 SHORT_NAME = "SBIT"
 VERSION = "1.3.0-beta1"
 YEAR = 2026
-AUTHOR = "VOVAN"
+AUTHOR = "VovanNBit"
 ORGANIZATION = ""                           # TODO: школа или университет
 SUPERVISOR = ""                             # TODO: Удалить данную вкладку
-REPO_URL = "https://github.com/UnLuck000/StretchBIT_AV"
+REPO_URL = "https://github.com/VovanNBit/StretchBIT_AV"
 RELEASES_URL = REPO_URL + "/releases"
 
 THESIS = ("Разработка и исследование системы обнаружения вредоносного программного "

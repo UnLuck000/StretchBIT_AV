@@ -49,7 +49,7 @@ def test_mit_notice_and_permissions_are_not_overridden_by_eula():
     root = Path(__file__).resolve().parent.parent
     license_text = (root / "LICENSE").read_text(encoding="utf-8")
     eula = (root / "docs" / "EULA.txt").read_text(encoding="utf-8")
-    assert "Copyright (c) 2026 VOVAN" in license_text
+    assert "Copyright (c) 2026 VovanNBit" in license_text
     assert "sublicense, and/or sell" in license_text
     assert "included in all" in license_text
     assert "не требуется" in eula
@@ -58,6 +58,18 @@ def test_mit_notice_and_permissions_are_not_overridden_by_eula():
     assert "Принятие этого соглашения включает согласие на передачу" not in eula
     spec = (root / "StretchBIT.spec").read_text(encoding="utf-8")
     assert 'ROOT / "LICENSE"' in spec and 'ROOT / "docs" / "PRIVACY.txt"' in spec
+
+
+def test_public_author_is_consistent_and_documents_have_no_email():
+    import re
+    import appinfo
+    root = Path(__file__).resolve().parent.parent
+    assert appinfo.AUTHOR == "VovanNBit"
+    assert f"Copyright (c) 2026 {appinfo.AUTHOR}" in (root / "LICENSE").read_text(encoding="utf-8")
+    for name in ("README.md", "docs/EULA.txt", "docs/PRIVACY.txt"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert appinfo.AUTHOR in text
+        assert re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text) is None
 
 
 def test_eula_requires_an_explicit_checkbox(app):
