@@ -277,6 +277,8 @@ class ToolsPage(_UiPage):
             if isinstance(group.layout(), QVBoxLayout):
                 group.layout().addStretch()  # плитки прижаты к верху группы
         self.btn_admin = child(self.ui, QPushButton, "btnRelaunchAdmin")
+        self.btn_admin.setText("Системные инструменты с правами...")
+        self.btn_admin.setToolTip("Повысить права выбранного инструмента, не меняя пользователя главного окна")
         self.btn_admin.setVisible(not is_admin())  # с правами администратора кнопка не нужна
         if window is not None:
             self.btn_admin.clicked.connect(lambda checked=False: window.restart_as_admin())
@@ -594,7 +596,7 @@ class SettingsPage(_UiPage):
     def load_values(self) -> None:
         for widget in self._all:
             widget.blockSignals(True)
-        self.chk_autostart.setChecked(cfg.get("startup/autostart"))
+        self.chk_autostart.setChecked(cfg.autostart_gui_enabled())
         self.chk_block_exit.setChecked(cfg.get("general/block_exit"))
         self.chk_on_top.setChecked(cfg.get("general/on_top"))
         self.chk_decoys.setChecked(cfg.get("protect/decoys"))
@@ -675,7 +677,7 @@ class SettingsPage(_UiPage):
         self.changed.emit(key, value)
 
     def _on_autostart(self, checked: bool) -> None:
-        previous = cfg.get("startup/autostart")
+        previous = cfg.autostart_gui_enabled()
         try:
             cfg.set_("startup/autostart", checked)
             # задание входа есть всегда (возврат сети после VPN): меняется только его режим —

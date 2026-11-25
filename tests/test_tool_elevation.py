@@ -38,12 +38,19 @@ def test_uac_cancellation_does_not_report_success(monkeypatch):
     assert not elevate.open_tool("processes", allowed=["memory"])
 
 
-def test_process_manager_opens_separately_without_creating_local_window():
+def test_process_manager_opens_locally_without_uac(monkeypatch):
     calls = []
+    signal = SimpleNamespace(connect=lambda callback: None)
+    local = SimpleNamespace(analyze_requested=signal, restart_requested=signal,
+                            set_memory_allowed=lambda on: None, show=lambda: None,
+                            raise_=lambda: None, activateWindow=lambda: None)
+    monkeypatch.setattr("mainwindow.tools.ProcessWindow", lambda: local)
+    monkeypatch.setattr(access, "allowed", lambda key: True)
     window = SimpleNamespace(tool_blocked=lambda key: False, proc_window=None,
-                             _open_elevated=lambda name: calls.append(name) or True)
+                             _open_elevated=lambda name: calls.append(name) or True,
+                             apply_on_top=lambda on: None)
     ToolsMixin.open_process_manager(window)
-    assert calls == ["processes"] and window.proc_window is None
+    assert calls == [] and window.proc_window is local
 
 
 def test_recovery_action_requests_uac_even_if_local_window_exists():

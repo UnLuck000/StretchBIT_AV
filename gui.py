@@ -28,6 +28,16 @@ if "--watchdog" in sys.argv:  # сторож: перезапуск после н
         pass
     sys.exit(0)
 
+if "--session-start" in sys.argv:
+    # HKLM Run запускается Windows в каждом вошедшем пользовательском сеансе.
+    # Установщик не выбирает SID/папку будущего пользователя и не выдаёт GUI права.
+    from service import editions as _login_editions
+    if _login_editions.passive():
+        sys.exit(0)
+    from ui import settings as _login_cfg
+    sys.argv.remove("--session-start")
+    sys.argv.append("--autostart" if _login_cfg.autostart_gui_enabled() else "--recover-network")
+
 if "--recover-network" in sys.argv:  # автозапуск: только возврат сети после сбоя VPN
     import selfguard
     try:
@@ -127,7 +137,7 @@ if _transfer_now():
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QLabel, QMainWindow, QMessageBox, QScrollArea, QSystemTrayIcon,
+    QApplication, QFrame, QLabel, QMainWindow, QMenu, QMessageBox, QScrollArea, QSystemTrayIcon,
     QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -386,20 +396,22 @@ class MainWindow(JournalMixin, ToolsMixin, UsbMixin, ProtectionMixin, ScansMixin
     # ---------- админ-права ----------
 
     def restart_as_admin(self):
-        parent = self if self.isVisible() else None
-        answer = QMessageBox.question(
-            parent, "Права администратора",
-            "Программа будет перезапущена с правами администратора. "
-            "Защита и сканирование на время перезапуска остановятся. Продолжить?")
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        if relaunch_as_admin():
-            if self.guard is not None:
-                self.guard.release()  # новый экземпляр сразу сможет занять имя
-            self.quit_app(force=True)  # перезапуск разрешён и при запрете выхода
-        else:
-            QMessageBox.warning(parent, "Права администратора",
-                                "Не удалось перезапустить (запрос UAC отклонён?)")
+        # Совместимое имя обработчика, но больше не runas всего GUI с его личными данными.
+        menu = QMenu(self)
+        choices = {}
+        for title, tool, button, tab in (
+                ("Диспетчер процессов", "processes", "btnProcessManager", 0),
+                ("Точки восстановления", "recovery", "btnRestorePoint", 0),
+                ("Целостность Windows", "recovery", "btnSfcDism", 1),
+                ("Проверка системы", "recovery", "btnSystemChecks", 2),
+                ("Автозапуск", "autoruns", "btnAutoruns", 0),
+                ("Драйверы", "drivers", "btnDrivers", 0)):
+            item = menu.addAction(title)
+            item.setEnabled(access.allowed(button))
+            choices[item] = (tool, tab)
+        selected = menu.exec(self.mapToGlobal(self.rect().center()))
+        if selected in choices:
+            self._open_elevated(*choices[selected])
 
     # ---------- анализатор файлов ----------
 

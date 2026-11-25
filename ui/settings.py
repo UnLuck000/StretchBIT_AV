@@ -280,6 +280,43 @@ TASK_NAME = "StretchBIT"
 LEGACY_TASK = "StudyAV"  # задание прежних версий: заменяется новым
 
 
+def _startup_app_key() -> str:
+    from diag import edition
+    return "StretchBIT-test" if edition.is_test() else "StretchBIT"
+
+
+def machine_startup_command() -> str:
+    """Установщик регистрирует этот лёгкий вход для всех пользователей, без runas."""
+    return f'"{sys.executable}" --session-start'
+
+
+def machine_startup_current() -> bool:
+    if winreg is None or not getattr(sys, "frozen", False):
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, RUN_KEY, 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            value = winreg.QueryValueEx(key, _startup_app_key())[0]
+        return isinstance(value, str) and value.casefold() == machine_startup_command().casefold()
+    except OSError:
+        return False
+
+
+def autostart_gui_enabled() -> bool:
+    """Личный выбор имеет приоритет над исходным выбором администратора установки."""
+    if store().contains("startup/autostart"):
+        return bool(get("startup/autostart"))
+    if winreg is not None and getattr(sys, "frozen", False):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                rf"Software\{_startup_app_key()}\Startup", 0,
+                                winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                return bool(winreg.QueryValueEx(key, "GuiEnabled")[0])
+        except OSError:
+            pass
+    return False
+
+
 def user_task_name() -> str:
     """Отдельное задание для SID пользователя, не для учётной записи UAC-администратора."""
     from service.winapi import current_sid
@@ -292,7 +329,7 @@ def user_task_name() -> str:
 def _autostart_parts() -> tuple[str, str]:
     """(программа, аргументы) для задания планировщика. По умолчанию — лёгкий возврат сети
     после сбоя VPN (--recover-network); при включённом автозапуске всей программы — она целиком."""
-    args = "--autostart" if get("startup/autostart") else "--recover-network"
+    args = "--autostart" if autostart_gui_enabled() else "--recover-network"
     if getattr(sys, "frozen", False):
         return sys.executable, args
     pythonw = Path(sys.executable).with_name("pythonw.exe")  # без окна консоли
@@ -349,6 +386,8 @@ def autostart_enabled() -> bool:
 def autostart_current() -> bool:
     """Задание есть и запускает именно эту копию программы (папку могли перенести) в
     правильном режиме (лёгкий возврат сети --recover-network или вся программа --autostart)."""
+    if machine_startup_current():
+        return True
     result = _schtasks("/Query", "/TN", user_task_name(), "/XML")
     if result.returncode != 0:
         return False
@@ -378,6 +417,14 @@ def set_autostart(enabled: bool) -> None:
     if sys.platform != "win32":
         raise OSError("Автозапуск поддерживается только в Windows")
     _remove_run_value()
+    if enabled and machine_startup_current():
+        # У установленной копии уже есть вход для всех SID. Удаляем собственное
+        # прежнее задание, чтобы не выполнять вход дважды; чужие задания не трогаем.
+        if autostart_enabled():
+            result = _schtasks("/Delete", "/TN", user_task_name(), "/F")
+            if result.returncode != 0:
+                raise OSError("Не удалось убрать прежнее задание пользователя")
+        return
     if _schtasks("/Query", "/TN", LEGACY_TASK).returncode == 0:
         _schtasks("/Delete", "/TN", LEGACY_TASK, "/F")
     if not enabled:
@@ -415,6 +462,9 @@ def ensure_autostart() -> None:
     except OSError:
         pass
     try:
+        if machine_startup_current():
+            set_autostart(True)
+            return
         if not autostart_current():
             set_autostart(True)
     except OSError:
@@ -423,6 +473,13 @@ def ensure_autostart() -> None:
 
 def remove_install_autostart() -> None:
     """Деинсталляция с правами: задания всех SID, но только для удаляемой копии программы."""
+    if machine_startup_current():
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, RUN_KEY, 0,
+                            winreg.KEY_READ | winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as key:
+            # Повторно проверить под тем же открытым ключом: не удалить запись другой копии.
+            if winreg.QueryValueEx(key, _startup_app_key())[0].casefold() == \
+                    machine_startup_command().casefold():
+                winreg.DeleteValue(key, _startup_app_key())
     result = _schtasks("/Query", "/FO", "CSV", "/NH")
     if result.returncode != 0:
         raise OSError("Не удалось прочитать задания автозапуска")

@@ -160,7 +160,7 @@ class RealtimeMonitor:
 
     def __init__(self, folders, sig_dir: Path, rules_dir: Path,
                  exclude: list[Path], on_event, settle: float = 1.5,
-                 system: list[tuple[Path, bool, bool]] | None = None):
+                 system: list[tuple[Path, bool, bool]] | None = None, system_provider=None):
         self.folders = [Path(f) for f in folders]
         self.system = system_folders() if system is None else system
         self.sig_dir = sig_dir
@@ -174,6 +174,9 @@ class RealtimeMonitor:
         self._stop = threading.Event()
         self._reload = threading.Event()
         self._folder_request = None
+        self._system_request = None
+        self._system_provider = system_provider
+        self._next_system_refresh = time.monotonic() + 60
         self._thread: threading.Thread | None = None
         self._signatures = None
         self._rules = None
@@ -198,14 +201,33 @@ class RealtimeMonitor:
         with self._lock:
             self._folder_request = [Path(f) for f in folders]
 
+    def update_system_folders(self, folders):
+        """Служба обнаружила новые профили пользователей: применить без остановки защиты."""
+        proposed = list(folders)
+        with self._lock:
+            self._system_request = proposed if proposed != self.system else None
+
+    def _refresh_system_folders(self, now: float) -> None:
+        if self._system_provider is None or now < self._next_system_refresh:
+            return
+        self._next_system_refresh = now + 60
+        try:
+            self.update_system_folders(self._system_provider())
+        except Exception as e:
+            self._emit("error", f"Не удалось обновить папки пользователей: {e}")
+
     def _replace_observer(self, observer, handler):
         with self._lock:
             folders, self._folder_request = self._folder_request, None
-        if folders is None:
+            systems, self._system_request = self._system_request, None
+        if folders is None and systems is None:
             return observer
-        previous = self.folders
+        previous, previous_system = self.folders, self.system
         replacement = Observer()
-        self.folders = folders
+        if folders is not None:
+            self.folders = folders
+        if systems is not None:
+            self.system = systems
         try:
             user, system = self._schedule(replacement, handler)
             if user + system == 0:
@@ -214,6 +236,7 @@ class RealtimeMonitor:
             replacement.start()
         except Exception as e:
             self.folders = previous
+            self.system = previous_system
             replacement.stop()
             if replacement.ident is not None:
                 replacement.join(timeout=5)
@@ -321,6 +344,7 @@ class RealtimeMonitor:
         self._emit("status", "Защита включена.")
         try:
             while not self._stop.wait(0.5):
+                self._refresh_system_folders(time.monotonic())
                 observer = self._replace_observer(observer, handler)
                 if self._reload.is_set():
                     self._reload.clear()

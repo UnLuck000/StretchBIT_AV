@@ -140,6 +140,7 @@ class Backend:
         self.since = 0.0
         self.adapter = ""
         self.error = ""
+        self.tunnel_dir = TUNNEL_DIR
 
     def connect(self, profile) -> None:
         raise NotImplementedError
@@ -183,8 +184,8 @@ class WireGuardBackend(Backend):
     def connect(self, profile) -> None:
         self._set(CONNECTING)
         self.name = tunnel_name(profile.name)
-        TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        conf = (TUNNEL_DIR / f"{self.name}.conf").absolute()
+        self.tunnel_dir.mkdir(parents=True, exist_ok=True)
+        conf = (self.tunnel_dir / f"{self.name}.conf").absolute()
         privatefiles.write_text(conf, profile.config, administrators=True)
         self.log(f"WireGuard: устанавливаю туннель {self.name}...")
         result = subprocess.run([self.exe, "/installtunnelservice", str(conf)],
@@ -206,7 +207,7 @@ class WireGuardBackend(Backend):
             self._set(DISCONNECTED)
             return
         self.log(f"WireGuard: отключаю {self.name}...")
-        _uninstall(self.exe, self.name, str((TUNNEL_DIR / f"{self.name}.conf").resolve()))
+        _uninstall(self.exe, self.name, str((self.tunnel_dir / f"{self.name}.conf").absolute()))
         self.adapter = ""
         self._set(DISCONNECTED)
         self.log("WireGuard: отключено")
@@ -236,8 +237,8 @@ class OpenVPNBackend(Backend):
 
     def connect(self, profile) -> None:
         self._set(CONNECTING)
-        TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        self.conf = (TUNNEL_DIR / f"{tunnel_name(profile.name)}.ovpn").absolute()
+        self.tunnel_dir.mkdir(parents=True, exist_ok=True)
+        self.conf = (self.tunnel_dir / f"{tunnel_name(profile.name)}.ovpn").absolute()
         privatefiles.write_text(self.conf, profile.config, administrators=True)
         self.proc = subprocess.Popen([self.exe, "--config", str(self.conf), "--verb", "3"],
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -356,7 +357,7 @@ class XrayBackend(Backend):
             x.apply_options(config, v, opts, self.log)
             self.log(describe_options(opts))
             self.env = xray_env(opts)
-            self.config_path = x.write_config(config, TUNNEL_DIR)
+            self.config_path = x.write_config(config, self.tunnel_dir)
         except (OSError, ValueError) as e:
             self._set(ERROR, f"Xray: {e}")
             self.log(self.error)
@@ -509,8 +510,8 @@ class SingBoxBackend(Backend):
         return cfg.get(key)
 
     def _write(self, config: dict, name: str) -> Path:
-        TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        path = (TUNNEL_DIR / name).absolute()
+        self.tunnel_dir.mkdir(parents=True, exist_ok=True)
+        path = (self.tunnel_dir / name).absolute()
         privatefiles.write_text(path, json.dumps(config, ensure_ascii=False, indent=1),
                                 administrators=True)
         self.paths.append(path)
@@ -793,9 +794,29 @@ def needs_service(kind: str, mode: str = "") -> bool:
     return kind in ("wireguard", "openvpn") or (kind == "vless" and mode in ("tun", ""))
 
 
+class ServiceRequiredBackend(Backend):
+    available = False
+    missing = ("доступная служба защиты StretchBIT. TUN/WireGuard/OpenVPN выполняются службой, "
+               "а не повышением прав окна. Проверьте службу и заново откройте программу; "
+               "локальный прокси доступен без прав администратора")
+
+    def connect(self, profile) -> None:
+        self._set(ERROR, self.missing)
+
+    def disconnect(self) -> None:
+        self._set(DISCONNECTED)
+
+
 def backend_for(kind: str, log, mode: str = "") -> Backend:
     if REMOTE is not None and needs_service(kind, mode):
         return REMOTE.backend(kind, log, mode)
+    from trustseal import is_admin
+    if (needs_service(kind, mode) or kind == "vless" and mode == "tun-xray") and not is_admin():
+        backend = ServiceRequiredBackend(log)
+        if kind == "vless" and mode == "tun-xray":
+            backend.missing = ("режим TUN через службу: выберите TUN (sing-box + Xray). "
+                               "Запасной Xray TUN службой не поддерживается")
+        return backend
     if kind == "vless":  # tun — sing-box + Xray; proxy, tun-xray, local — один Xray
         return SingBoxBackend(log) if mode in ("tun", "") else XrayBackend(log)
     return {"wireguard": WireGuardBackend, "openvpn": OpenVPNBackend}.get(kind, DemoBackend)(log)

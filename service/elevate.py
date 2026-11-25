@@ -22,6 +22,11 @@ from ctypes import wintypes
 
 TOOLS = ("recovery", "autoruns", "drivers", "processes")
 CAPABILITIES = ("memory", "restore", "sfc", "checks")
+RECOVERY_ACTIONS = {
+    "create": "restore", "enable-protection": "restore", "check": "checks",
+    "command:sfc_verify": "sfc", "command:sfc_scan": "sfc", "command:dism_check": "sfc",
+    "command:dism_scan": "sfc", "command:dism_restore": "sfc",
+}
 ERROR_CANCELLED = 1223
 SEE_MASK_NOCLOSEPROCESS = 0x40
 SW_SHOWNORMAL = 1
@@ -89,7 +94,7 @@ def tool_arguments(name: str, tab: int = 0, *, allowed=(), action: str | None = 
     """Только известный инструмент, разрешения интерфейса и фиксированные действия."""
     if name not in TOOLS or any(cap not in CAPABILITIES for cap in allowed):
         raise ValueError("Неизвестный инструмент или разрешение")
-    if action is not None and (name != "recovery" or action not in ("create", "check")):
+    if action is not None and (name != "recovery" or action not in RECOVERY_ACTIONS):
         raise ValueError("Неизвестное действие инструмента")
     args = ["--tool", name] + (["--tab", str(int(tab))] if tab else [])
     args += [f"--allow-{cap}" for cap in allowed]
@@ -149,13 +154,19 @@ def run_tool(argv: list[str]) -> int:
         window.show_tab(tab)
         action = argv[argv.index("--action") + 1] if "--action" in argv and \
             argv.index("--action") + 1 < len(argv) else None
-        if action == "create" and "--allow-restore" in argv:
-            QTimer.singleShot(0, window.create_restore_point)  # подтверждение остаётся в окне
-        elif action == "check" and "--allow-checks" in argv:
-            QTimer.singleShot(0, window.run_system_check)
-        elif "--action" in argv:
-            window.deleteLater()
-            return 2
+        if "--action" in argv:
+            capability = RECOVERY_ACTIONS.get(action)
+            if capability is None or f"--allow-{capability}" not in argv:
+                window.deleteLater()
+                return 2
+            if action.startswith("command:"):
+                key = action.partition(":")[2]  # только фиксированный ключ COMMANDS
+                QTimer.singleShot(0, lambda: window.start_command(key))
+            else:
+                callback = {"create": window.create_restore_point,
+                            "enable-protection": window.enable_protection,
+                            "check": window.run_system_check}[action]
+                QTimer.singleShot(0, callback)  # подтверждения остаются в самом окне
     elif name == "autoruns":
         from autoruns.window import AutorunsWindow
         window = AutorunsWindow()

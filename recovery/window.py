@@ -53,6 +53,7 @@ class Bridge(QObject):
 
 class RecoveryWindow(QMainWindow):
     restart_requested = Signal()
+    admin_action_requested = Signal(str, int)
 
     def __init__(self):
         super().__init__()
@@ -226,6 +227,9 @@ class RecoveryWindow(QMainWindow):
                 QTreeWidgetItem([str(p.number), p.created, p.description, p.kind]))
 
     def create_restore_point(self) -> None:
+        if not is_admin():
+            self.admin_action_requested.emit("create", TAB_POINTS)
+            return
         description = self.rp_desc.text().strip() or appinfo.SHORT_NAME
         answer = QMessageBox.question(
             self, "Точка восстановления",
@@ -236,6 +240,9 @@ class RecoveryWindow(QMainWindow):
                         "Создаю точку восстановления...")
 
     def enable_protection(self) -> None:
+        if not is_admin():
+            self.admin_action_requested.emit("enable-protection", TAB_POINTS)
+            return
         self._async("enable", rsys.enable_system_protection, "Включаю защиту системы...")
 
     def open_wizard(self) -> None:
@@ -284,8 +291,7 @@ class RecoveryWindow(QMainWindow):
         title, args, modifies = COMMANDS[key]
         self._cmd_title = title
         if not is_admin():
-            QMessageBox.warning(self, "Целостность Windows",
-                                "Для этой операции нужны права администратора.")
+            self.admin_action_requested.emit("command:" + key, TAB_INTEGRITY)
             return
         if modifies:
             answer = QMessageBox.question(

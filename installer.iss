@@ -147,6 +147,13 @@ Name: "{autoprograms}\{#DisplayName}"; Filename: "{app}\{#ExeName}"; WorkingDir:
 Name: "{autodesktop}\{#DisplayName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{autoprograms}\Удалить {#DisplayName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 
+[Registry]
+; Машинная регистрация, но процесс Windows запускает в контексте вошедшего пользователя.
+; У редакций отдельные значения: удаление одной не убирает автозапуск другой.
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppKey}"; ValueData: """{app}\{#ExeName}"" --session-start"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\{#AppKey}\Startup"; ValueType: dword; ValueName: "GuiEnabled"; ValueData: "1"; Tasks: autostart; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKLM; Subkey: "Software\{#AppKey}\Startup"; ValueType: dword; ValueName: "GuiEnabled"; ValueData: "0"; Tasks: not autostart; Flags: uninsdeletevalue uninsdeletekeyifempty
+
 [Run]
 ; владелец — «Администраторы» (файлы прежней установки без прав принадлежали пользователю, а
 ; владелец может вернуть себе запись); наследуемые права сброшены; S-1-5-32-544 —
@@ -163,8 +170,6 @@ Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN StudyAV /F"; Flags: run
 ; Не писать HKCU/AppData и DPAPI от имени администратора, чей пароль ввели в UAC.
 ; В тихой установке ознакомления не было: приложение покажет документы при первом запуске.
 Filename: "{app}\{#ExeName}"; Parameters: "--accept-installed-legal {#LegalRevision}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser skipifsilent; StatusMsg: "Сохраняю ознакомление с документами..."
-Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: autostart; StatusMsg: "Включаю автозапуск..."
-Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart off"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: not autostart; StatusMsg: "Настраиваю возврат сети после VPN..."
 Filename: "{app}\{#ExeName}"; Description: "Запустить {#DisplayName}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallDelete]

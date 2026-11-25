@@ -13,7 +13,6 @@ C:\Windows\System32: запись конфигурации VPN или очист
     без прав не может навредить больше, чем любая другая программа пользователя);
   * из исходников (python gui.py, тесты) — папка проекта, как раньше.
 """
-import os
 import sys
 from pathlib import Path
 
@@ -32,7 +31,8 @@ def root() -> Path:
     if not getattr(sys, "frozen", False) or _admin():
         return Path(userdata.APP_DIR)
     from diag import edition
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    from usercontext import local_dir
+    base = local_dir()
     return base / ("StretchBIT-test" if edition.is_test() else "StretchBIT")
 
 

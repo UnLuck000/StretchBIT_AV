@@ -57,8 +57,8 @@
    <item>
     <widget class="QPushButton" name="btnRelaunchAdmin">
      <property name="minimumSize"><size><width>0</width><height>40</height></size></property>
-     <property name="toolTip"><string>Программа будет перезапущена с правами администратора (запрос UAC). Кнопка видна только без прав администратора.</string></property>
-     <property name="text"><string>Перезапустить от имени администратора</string></property>
+      <property name="toolTip"><string>Открыть выбранный системный инструмент с правами через UAC, не перезапуская главное окно.</string></property>
+      <property name="text"><string>Системные инструменты с правами...</string></property>
     </widget>
    </item>
    <item>

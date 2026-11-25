@@ -73,13 +73,14 @@ class ToolsMixin:
     def open_recovery(self, tab: int = 0, action: str | None = None):
         if tab in self.TAB_TOOLS and self.tool_blocked(self.TAB_TOOLS[tab]):
             return
-        if (self.recovery_window is None or action is not None) and \
-                self._open_elevated("recovery", tab, action):
+        if action == "create" and self._open_elevated("recovery", tab, action):
             return
         if self.recovery_window is None:
             self.recovery_window = RecoveryWindow()
             self.recovery_window.restart_requested.connect(
                 lambda: self._restart_tool_as_admin("recovery", "recovery_window"))
+            self.recovery_window.admin_action_requested.connect(
+                lambda requested, target: self._open_elevated("recovery", target, requested))
             self._apply_recovery_access()
             self.apply_on_top(cfg.get("general/on_top"))
         self.recovery_window.show()
@@ -162,8 +163,6 @@ class ToolsMixin:
             return
         from toolbox import windows
         window = self.tool_windows.get(name)
-        if window is None and name == "drivers" and self._open_elevated("drivers"):
-            return
         if window is None:
             # окна без владельца: не держатся поверх главного окна, его можно вывести вперёд
             if name == "link":
@@ -202,8 +201,6 @@ class ToolsMixin:
             return
         if self.tool_blocked("btnAutoruns"):
             return
-        if self.autoruns_window is None and self._open_elevated("autoruns"):
-            return
         if self.autoruns_window is None:
             self.autoruns_window = AutorunsWindow()
             self.autoruns_window.analyze_requested.connect(lambda path: self.open_analyzer(path))
@@ -220,8 +217,6 @@ class ToolsMixin:
 
     def open_process_manager(self):
         if self.tool_blocked("btnProcessManager"):
-            return
-        if self.proc_window is None and self._open_elevated("processes"):
             return
         if self.proc_window is None:
             self.proc_window = ProcessWindow()

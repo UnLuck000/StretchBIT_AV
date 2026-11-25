@@ -52,8 +52,7 @@ def test_installer_acceptance_does_not_bypass_acl_failure(monkeypatch):
 
 def test_installer_user_commands_run_as_original_user_and_silent_has_no_consent():
     script = (ROOT / "installer.iss").read_text(encoding="utf-8")
-    for marker in ('Parameters: "--accept-installed-legal ', 'Parameters: "--set-autostart on"',
-                   'Parameters: "--set-autostart off"', 'Description: "Запустить '):
+    for marker in ('Parameters: "--accept-installed-legal ', 'Description: "Запустить '):
         line = next(line for line in script.splitlines() if marker in line)
         assert "runasoriginaluser" in line
         if "--accept-installed-legal" in line:

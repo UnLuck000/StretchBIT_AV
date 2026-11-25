@@ -427,7 +427,8 @@ class ServiceCore:
         return RealtimeMonitor(folders, sig_dir=signatures.parent,
                                rules_dir=Path("signatures/rules"),
                                exclude=[QUARANTINE_DIR, signatures.parent.resolve(), self.folder],
-                               on_event=on_event, system=service_system_folders())
+                               on_event=on_event, system=service_system_folders(),
+                               system_provider=service_system_folders)
 
     def _start_monitor(self) -> None:
         self._run += 1
@@ -541,6 +542,11 @@ class ServiceCore:
     def op_hello(self, client, args):
         import appinfo
         from diag import edition
+        # GUI другого пользователя мог войти уже после запуска службы при загрузке.
+        # Источник — реестр машины, не присланные пути/имя администратора.
+        with self._lock:
+            if self._monitor is not None and hasattr(self._monitor, "update_system_folders"):
+                self._monitor.update_system_folders(service_system_folders())
         return {"version": appinfo.VERSION, "edition": edition.edition(),
                 "protocol": protocol.PROTOCOL, "boot": self.boot, "sid": client.sid,
                 "elevated": client.elevated}

@@ -218,6 +218,7 @@ def test_data_dirs_without_admin(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(datadirs, "_admin", lambda: False)
     monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\x\AppData\Local")
+    monkeypatch.setattr("usercontext.local_dir", lambda: Path(r"C:\Users\x\AppData\Local"))
     assert datadirs.root() == Path(r"C:\Users\x\AppData\Local") / "StretchBIT"
     monkeypatch.setattr(datadirs, "_admin", lambda: True)
     assert datadirs.root() == Path(userdata.APP_DIR)

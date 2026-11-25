@@ -278,5 +278,6 @@ def test_autostart_setting_is_rolled_back_on_task_error(monkeypatch):
 
 def test_installer_registers_recovery_even_when_gui_autostart_off():
     text = (ROOT / "installer.iss").read_text(encoding="utf-8")
-    assert 'Parameters: "--set-autostart off"' in text
+    assert "--session-start" in text
+    assert 'ValueName: "GuiEnabled"; ValueData: "0"' in text
     assert "Tasks: not autostart" in text

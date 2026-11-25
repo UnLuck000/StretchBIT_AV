@@ -40,7 +40,8 @@ def _config_dir() -> Path:
     if os.environ.get(ENV) and not getattr(sys, "frozen", False):
         return Path(os.environ[ENV])
     from diag import edition
-    root = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    from usercontext import roaming_dir
+    root = roaming_dir()
     return root / (NAME + ("-test" if edition.is_test() else ""))
 
 

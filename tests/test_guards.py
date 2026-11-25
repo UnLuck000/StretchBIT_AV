@@ -398,7 +398,7 @@ def test_removed_extension_is_not_installed(tmp_path, monkeypatch):
     assert items and items[0].removed and items[0].risk[0] == "removed"
 
 
-def test_singbox_config_and_modes():
+def test_singbox_config_and_modes(monkeypatch):
     from vpn import backends, singbox, xray
     reality = ("vless://11111111-2222-3333-4444-555555555555@vpn.example.com:443?type=tcp"
                "&security=reality&pbk=key&sid=ab&sni=www.microsoft.com&flow=xtls-rprx-vision#r")
@@ -433,6 +433,7 @@ def test_singbox_config_and_modes():
     assert any(d.get("type") == "tcp" for d in udp["dns"]["servers"])
     assert config["route"]["auto_detect_interface"] and config["route"]["find_process"]
     assert profiles.from_text("x", reality).mode == "tun"  # по умолчанию — TUN
+    monkeypatch.setattr("trustseal.is_admin", lambda: True)
     assert isinstance(backends.backend_for("vless", print, "tun"), backends.SingBoxBackend)
     assert isinstance(backends.backend_for("vless", print, "tun-xray"), backends.XrayBackend)
     assert isinstance(backends.backend_for("vless", print, "proxy"), backends.XrayBackend)

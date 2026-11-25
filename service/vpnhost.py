@@ -134,9 +134,13 @@ class VpnHost:
             return self.factory(kind, self._log, mode)
         from vpn import backends
         if kind == "vless":
-            return backends.SingBoxBackend(self._log)
-        return {"wireguard": backends.WireGuardBackend,
-                "openvpn": backends.OpenVPNBackend}[kind](self._log)
+            backend = backends.SingBoxBackend(self._log)
+        else:
+            backend = {"wireguard": backends.WireGuardBackend,
+                       "openvpn": backends.OpenVPNBackend}[kind](self._log)
+        # Не AppData/кэш администратора установки и не конфигурация GUI.
+        backend.tunnel_dir = self.folder / "vpn-runtime"
+        return backend
 
     def _assets(self, folder: str) -> str:
         """geo-файлы профиля маршрутизации окна — копией в папку службы."""
