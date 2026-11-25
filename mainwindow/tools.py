@@ -36,32 +36,50 @@ class ToolsMixin:
                 self.open_recovery(tab)
                 return
 
-    def _open_elevated(self, name: str, tab: int = 0) -> bool:
-        """Окно со службой без прав: инструмент — процессом с правами через UAC
-        (service/elevate.py). False — открыть здесь (служба не нужна или UAC отклонён)."""
+    def _open_elevated(self, name: str, tab: int = 0, action: str | None = None) -> bool:
+        """Повысить только инструмент; главное окно и его пользователь не меняются."""
         from service import elevate
+        if name == "recovery" and tab == 3:
+            return False  # файловые ассоциации относятся к HKCU исходного пользователя
         if not elevate.wanted(name):
             return False
+        allowed = []
+        if name == "processes" and access.allowed("btnMemoryDeep"):
+            allowed.append("memory")
+        if name == "recovery":
+            for capability, button in (("restore", "btnRestorePoint"), ("sfc", "btnSfcDism"),
+                                       ("checks", "btnSystemChecks")):
+                if access.allowed(button):
+                    allowed.append(capability)
         try:
-            if elevate.open_tool(name, tab):
+            if elevate.open_tool(name, tab, allowed=allowed, action=action):
                 self.statusBar().showMessage("Инструмент открыт отдельным окном с правами "
                                              "администратора", 8000)
                 return True
         except OSError as e:
             self.statusBar().showMessage(str(e), 8000)
-        self.statusBar().showMessage("Без прав администратора: инструмент только показывает, "
-                                     "изменения недоступны", 10000)
+        self.statusBar().showMessage("Инструмент открыт без повышения прав: часть сведений "
+                                     "и действий может быть недоступна", 10000)
         return False
+
+    def _restart_tool_as_admin(self, name: str, attribute: str) -> None:
+        window = getattr(self, attribute)
+        tab = window.tabs.currentIndex() if name == "recovery" and window is not None else 0
+        if self._open_elevated(name, tab):
+            if window is not None:
+                window.close()
+            setattr(self, attribute, None)
 
     def open_recovery(self, tab: int = 0, action: str | None = None):
         if tab in self.TAB_TOOLS and self.tool_blocked(self.TAB_TOOLS[tab]):
             return
-        if self.recovery_window is None and action is None and \
-                self._open_elevated("recovery", tab):
+        if (self.recovery_window is None or action is not None) and \
+                self._open_elevated("recovery", tab, action):
             return
         if self.recovery_window is None:
             self.recovery_window = RecoveryWindow()
-            self.recovery_window.restart_requested.connect(self.restart_as_admin)
+            self.recovery_window.restart_requested.connect(
+                lambda: self._restart_tool_as_admin("recovery", "recovery_window"))
             self._apply_recovery_access()
             self.apply_on_top(cfg.get("general/on_top"))
         self.recovery_window.show()
@@ -203,10 +221,13 @@ class ToolsMixin:
     def open_process_manager(self):
         if self.tool_blocked("btnProcessManager"):
             return
+        if self.proc_window is None and self._open_elevated("processes"):
+            return
         if self.proc_window is None:
             self.proc_window = ProcessWindow()
             self.proc_window.analyze_requested.connect(lambda path: self.open_analyzer(path))
-            self.proc_window.restart_requested.connect(self.restart_as_admin)
+            self.proc_window.restart_requested.connect(
+                lambda: self._restart_tool_as_admin("processes", "proc_window"))
             self.proc_window.set_memory_allowed(access.allowed("btnMemoryDeep"))
             self.apply_on_top(cfg.get("general/on_top"))
         self.proc_window.show()

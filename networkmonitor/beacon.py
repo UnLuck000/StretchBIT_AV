@@ -34,28 +34,29 @@ class Beacon:
     count: int          # сколько событий
     last: float         # время последнего события
     source: str         # tcp | dns | tls
+    pid: int = 0        # 0 — неизвестен; имя System само по себе не является доверием
 
 
 class BeaconDetector:
     def __init__(self):
         self._events: dict[tuple[str, str], deque] = {}
-        self._info: dict[tuple[str, str], tuple[str, str]] = {}
+        self._info: dict[tuple[str, str], tuple[str, str, str, int]] = {}
         self._reported: dict[tuple[str, str], float] = {}  # ключ -> период при оповещении
         self._lock = threading.Lock()
 
     def feed(self, program: str, exe: str, target: str, when: float,
-             source: str) -> Beacon | None:
+             source: str, pid: int = 0) -> Beacon | None:
         """Добавляет событие. Возвращает Beacon, если маячок найден впервые (или его
         период заметно изменился)."""
         if not target or not program:
             return None
-        key = (exe.lower() or program.lower(), target.lower())
+        key = (exe.lower() or f"{program.lower()}:{pid}", target.lower())
         with self._lock:
             times = self._events.setdefault(key, deque(maxlen=HISTORY))
             if times and when - times[-1] < MERGE_SECONDS:
                 return None
             times.append(when)
-            self._info[key] = (program, exe, source)
+            self._info[key] = (program, exe, source, pid)
             beacon = self._check(key, target)
             if beacon is None:
                 return None
@@ -76,8 +77,8 @@ class BeaconDetector:
         cv = statistics.pstdev(gaps) / mean
         if cv > MAX_CV:
             return None
-        program, exe, source = self._info[key]
-        return Beacon(program, exe, target, mean, cv, len(times), times[-1], source)
+        program, exe, source, pid = self._info[key]
+        return Beacon(program, exe, target, mean, cv, len(times), times[-1], source, pid)
 
     def current(self) -> list[Beacon]:
         """Все пары, которые сейчас выглядят как маячки."""

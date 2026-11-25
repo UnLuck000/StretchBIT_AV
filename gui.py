@@ -38,7 +38,17 @@ if "--recover-network" in sys.argv:  # автозапуск: только воз
         selfguard._note(f"автозапуск: возврат сети не удался: {e}")
     sys.exit(0)
 
-if "--set-autostart" in sys.argv:  # установщик: включить/выключить автозапуск всей программы
+if "--accept-installed-legal" in sys.argv:
+    from diag import consent as _consent
+    try:
+        _revision = sys.argv[sys.argv.index("--accept-installed-legal") + 1]
+        sys.exit(0 if _consent.accept_from_installer(_revision) else 1)
+    except (IndexError, OSError):
+        sys.exit(1)
+
+if "--set-autostart" in sys.argv:  # установщик: процесс исходного пользователя, не UAC-админа
+    import userdata
+    userdata.protect_config()
     from ui import settings as _cfg
     try:
         on = sys.argv[sys.argv.index("--set-autostart") + 1] == "on"
@@ -102,14 +112,8 @@ _protect_configuration()  # перенесённые файлы могли со�
 
 
 def _transfer_now() -> bool:
-    """Перенос данных другой версии (service/transfer.py) — до первого чтения настроек.
-    Ручной запуск без прав сейчас перезапустится через UAC: перенос сделает процесс с
-    правами (ключ подписи журнала другой версии читают только администраторы)."""
-    import trustseal
-    if any(a in sys.argv for a in ("--uninstall", "--tool", "--undo")):
-        return False
-    elevating = not ({"--autostart", "--analyze", "--alarm"} & set(sys.argv))
-    return trustseal.is_admin() or not elevating
+    """Пользовательские данные другой версии переносит сам пользователь, без смены SID."""
+    return not any(a in sys.argv for a in ("--uninstall", "--tool", "--undo"))
 
 
 if _transfer_now():
@@ -119,6 +123,7 @@ if _transfer_now():
             _dlog.info("Конфигурация: %s", _line)
     except Exception:  # noqa: BLE001 — без переноса программа всё равно запустится
         _dlog.exception("Конфигурация: перенос данных другой версии не удался")
+    _protect_configuration()  # перенесённые файлы тоже должны получить закрытую DACL
 
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
@@ -727,15 +732,6 @@ for _name, _fid in (("toggle_protection", "protect.realtime"), ("toggle_network"
     features.wrap_method(MainWindow, _name, _fid)
 
 
-def elevate_on_start() -> bool:
-    """Запуск пользователем без прав администратора: сразу окно UAC (без вопросов).
-    True — новый процесс с правами запущен, этот нужно закрыть; False — UAC отклонён,
-    программа работает без прав (часть защиты — в упрощённом режиме)."""
-    if is_admin():
-        return False
-    return relaunch_as_admin()
-
-
 def _argument(name: str) -> str | None:
     """Значение параметра командной строки вида: --name <значение>."""
     if name in sys.argv:
@@ -804,13 +800,9 @@ if __name__ == "__main__":
     if not ensure_accepted():
         sys.exit(1)  # до UAC, подключения к службе, запуска защит и регистрации автозапуска
 
-    # ручной запуск — сразу с запросом UAC, и при работающей службе: без прав инструменты
-    # (диспетчер процессов, память, флешки, расширения, точки восстановления...) только
-    # показывают (Windows 10, 14.11.2026). Без окна UAC: автозапуск (задание планировщика),
-    # меню Проводника и окно, которое служба открыла по тревоге (--alarm): там важнее
-    # показать тревогу сразу. Отказ в UAC — работа без прав, защита — в службе
-    if not autostart and not analyze_path and "--alarm" not in sys.argv and elevate_on_start():
-        sys.exit(0)
+    # GUI остаётся в контексте запустившего пользователя: общий runas заменял его
+    # на администратора из UAC (другие AppData, SID, DPAPI и настройки).
+    # Машинная защита/VPN — в службе; отдельные системные инструменты — service.elevate.
     # служба Windows установлена и отвечает: защита файлов, карантин и журнал защиты — в ней
     # (архитектура: ветка docs/ai-reference, ai/architecture/SERVICE.md)
     from service import client as _svc_client
@@ -836,8 +828,7 @@ if __name__ == "__main__":
 
     def _ensure_registration():
         # schtasks — до секунды на вызов (а с проверкой прежнего задания их три): в фоне
-        if is_admin():
-            cfg.ensure_autostart()  # задание входа (возврат сети после VPN) — с правами
+        cfg.ensure_autostart()  # собственное задание входа, без повышения прав GUI
         cfg.ensure_explorer_menu()  # пункт «Проверить в ...» в меню файлов — всегда
 
     if not passive:  # задание и меню Проводника общие у версий — их ведёт основная

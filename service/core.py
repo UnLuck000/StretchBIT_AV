@@ -146,14 +146,13 @@ def service_system_folders() -> list[tuple[Path, bool, bool]]:
         if not os.path.normcase(str(folder)).startswith(system_profile):
             add(folder, recursive, all_files)
     startup = Path("Microsoft", "Windows", "Start Menu", "Programs", "Startup")
-    for index, (profile, _load) in enumerate(profiles_by_recency()):
+    for profile, _load in profiles_by_recency():
         roaming, local = profile / "AppData" / "Roaming", profile / "AppData" / "Local"
         add(roaming / startup, True, True)
         add(roaming, True, False)
         add(local, True, False)
-        # документы: у ведущего профиля (последний заходивший) — все папки, у остальных —
-        # только Downloads и Documents
-        for folder, recursive, all_files in user_key_folders(profile, full=index == 0):
+        # Одинаковый охват для всех: вход администратора не должен уменьшать защиту остальных.
+        for folder, recursive, all_files in user_key_folders(profile):
             add(folder, recursive, all_files)
     return result
 

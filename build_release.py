@@ -304,8 +304,16 @@ def make_installer(folder: Path, edition: str) -> Path:
     iscc = find_iscc()
     if iscc is None:
         raise SystemExit("Нет Inno Setup 6 (ISCC.exe): winget install JRSoftware.InnoSetup")
+    from diag import consent
+    # Показать именно документы готовой сборки, а не другую редакцию из исходников.
+    legal_text = consent.text(folder / "app")
+    legal_file = ROOT / "build" / f"installer-legal-{edition}.txt"
+    legal_file.parent.mkdir(parents=True, exist_ok=True)
+    legal_file.write_text(legal_text, encoding="utf-8-sig")
+    legal_revision = hashlib.sha256(legal_text.encode("utf-8")).hexdigest()
     subprocess.run([str(iscc), "/Q", f"/DEdition={edition}", f"/DAppVersion={appinfo.VERSION}",
                     f"/DAppNumericVersion={installer_numeric_version(appinfo.VERSION)}",
+                    f"/DLegalFile={legal_file}", f"/DLegalRevision={legal_revision}",
                     f"/DSourceDir={folder}", f"/DOutputDir={ROOT / 'release'}",
                     str(ROOT / "installer.iss")], check=True, cwd=ROOT)
     return ROOT / "release" / f"{folder.name}-{appinfo.VERSION}-setup.exe"

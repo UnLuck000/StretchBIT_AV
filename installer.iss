@@ -29,6 +29,12 @@
 #ifndef AppNumericVersion
   #error "AppNumericVersion is required. Build with python build_release.py --installer."
 #endif
+#ifndef LegalFile
+  #error "LegalFile is required. Build with python build_release.py --installer."
+#endif
+#ifndef LegalRevision
+  #error "LegalRevision is required. Build with python build_release.py --installer."
+#endif
 #ifndef SourceDir
   #define SourceDir "dist\StretchBIT"
 #endif
@@ -104,9 +110,8 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 ShowLanguageDialog=no
-; Авторский код — MIT; политика показывается до лицензии. Отправки диагностики пока нет.
-InfoBeforeFile=docs\PRIVACY.txt
-LicenseFile=LICENSE
+; Тот же комплект, что в GUI: MIT (EN + RU), EULA и политика. Отправки диагностики нет.
+LicenseFile={#LegalFile}
 
 [Languages]
 Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
@@ -151,9 +156,16 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /reset /T /C /Q"; Flags: ru
 Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /C /Q"; Flags: runhidden
 ; служба защиты: создать или обновить (путь, автозапуск, перезапуск при сбое) и запустить
 Filename: "{app}\{#ExeName}"; Parameters: "--service-install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Устанавливаю службу защиты..."
-Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: autostart; StatusMsg: "Включаю автозапуск..."
-Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart off"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: not autostart; StatusMsg: "Настраиваю возврат сети после VPN..."
-Filename: "{app}\{#ExeName}"; Description: "Запустить {#DisplayName}"; Flags: nowait postinstall skipifsilent
+; Прежнее общее задание запускало GUI с наивысшими правами под установившим администратором.
+; Новые задания создаются отдельно для каждого пользователя без повышения прав.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN StretchBIT /F"; Flags: runhidden waituntilterminated
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN StudyAV /F"; Flags: runhidden waituntilterminated
+; Не писать HKCU/AppData и DPAPI от имени администратора, чей пароль ввели в UAC.
+; В тихой установке ознакомления не было: приложение покажет документы при первом запуске.
+Filename: "{app}\{#ExeName}"; Parameters: "--accept-installed-legal {#LegalRevision}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser skipifsilent; StatusMsg: "Сохраняю ознакомление с документами..."
+Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: autostart; StatusMsg: "Включаю автозапуск..."
+Filename: "{app}\{#ExeName}"; Parameters: "--set-autostart off"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated runasoriginaluser; Tasks: not autostart; StatusMsg: "Настраиваю возврат сети после VPN..."
+Filename: "{app}\{#ExeName}"; Description: "Запустить {#DisplayName}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallDelete]
 ; карантин, журналы работы, кэш, скачанные базы — всё, что программа создала в своей папке

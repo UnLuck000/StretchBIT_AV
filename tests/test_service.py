@@ -435,8 +435,8 @@ def test_service_folders_include_profiles(monkeypatch, tmp_path):
     assert folders[str(profile / "Desktop")] == (True, True)
 
 
-def test_service_folders_non_leading_profile_partial(monkeypatch, tmp_path):
-    """Неведущий профиль: только Downloads и Documents (без Desktop и прочих)."""
+def test_service_folders_have_equal_coverage_for_all_profiles(monkeypatch, tmp_path):
+    """Вход администратора не отбирает Desktop/Pictures/Videos/Music у другого профиля."""
     from service import core as svc_core
     lead = tmp_path / "Lead"
     other = tmp_path / "Other"
@@ -444,8 +444,9 @@ def test_service_folders_non_leading_profile_partial(monkeypatch, tmp_path):
                         lambda: [(lead, 200), (other, 100)])
     folders = {str(f) for f, _r, _a in svc_core.service_system_folders()}
     assert str(other / "Downloads") in folders and str(other / "Documents") in folders
-    assert str(other / "Desktop") not in folders
-    assert str(lead / "Desktop") in folders  # ведущий — полностью
+    for profile in (lead, other):
+        for name in ("Desktop", "Downloads", "Documents", "Pictures", "Videos", "Music"):
+            assert str(profile / name) in folders
 
 
 def test_installer_and_uninstall_know_service():

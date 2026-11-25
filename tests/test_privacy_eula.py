@@ -112,12 +112,12 @@ def test_eula_guard_precedes_registration_and_main_window():
     root = Path(__file__).resolve().parent.parent
     gui = (root / "gui.py").read_text(encoding="utf-8")
     main = gui[gui.index('if __name__ == "__main__":'):]
-    assert main.index("if not ensure_accepted():") < main.index("elevate_on_start()")
+    assert "elevate_on_start()" not in main
     assert main.index("if not ensure_accepted():") < main.index("service_client =")
     assert main.index("if not ensure_accepted():") < main.index("window = MainWindow()")
     spec = (root / "StretchBIT.spec").read_text(encoding="utf-8")
     assert '"EULA.txt"), "docs"' in spec
-    assert "LicenseFile=LICENSE" in (root / "installer.iss").read_text(encoding="utf-8")
+    assert "LicenseFile={#LegalFile}" in (root / "installer.iss").read_text(encoding="utf-8")
 
 
 def test_known_file_name_replaced_with_content_hash(tmp_path):

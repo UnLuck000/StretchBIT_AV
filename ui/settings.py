@@ -1,8 +1,11 @@
 import json
+import csv
+import io
 import os
 import subprocess
 import sys
 import threading
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -277,6 +280,15 @@ TASK_NAME = "StretchBIT"
 LEGACY_TASK = "StudyAV"  # задание прежних версий: заменяется новым
 
 
+def user_task_name() -> str:
+    """Отдельное задание для SID пользователя, не для учётной записи UAC-администратора."""
+    from service.winapi import current_sid
+    sid = current_sid()
+    if not sid:
+        raise OSError("Не удалось определить пользователя автозапуска")
+    return f"{TASK_NAME}-{sid}"
+
+
 def _autostart_parts() -> tuple[str, str]:
     """(программа, аргументы) для задания планировщика. По умолчанию — лёгкий возврат сети
     после сбоя VPN (--recover-network); при включённом автозапуске всей программы — она целиком."""
@@ -299,7 +311,7 @@ def _xml_escape(text: str) -> str:
 
 
 def task_xml(user: str) -> str:
-    """Задание: при входе пользователя, с наивысшими правами (без окна UAC), без ограничения
+    """Задание: при входе пользователя, БЕЗ повышения прав GUI, без ограничения
     по времени и без остановки при работе от батареи (у задания по умолчанию — 3 дня и
     «только от сети»: антивирус на ноутбуке не запустился бы)."""
     exe, args = _autostart_parts()
@@ -307,7 +319,7 @@ def task_xml(user: str) -> str:
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>{_xml_escape(appinfo.APP_NAME)}: защита при входе в Windows</Description></RegistrationInfo>
   <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{_xml_escape(user)}</UserId></LogonTrigger></Triggers>
-  <Principals><Principal id="Author"><UserId>{_xml_escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Principals><Principal id="Author"><UserId>{_xml_escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
@@ -331,23 +343,37 @@ def _schtasks(*args: str) -> subprocess.CompletedProcess:
 def autostart_enabled() -> bool:
     if sys.platform != "win32":
         return False
-    return _schtasks("/Query", "/TN", TASK_NAME).returncode == 0
+    return _schtasks("/Query", "/TN", user_task_name()).returncode == 0
 
 
 def autostart_current() -> bool:
     """Задание есть и запускает именно эту копию программы (папку могли перенести) в
     правильном режиме (лёгкий возврат сети --recover-network или вся программа --autostart)."""
-    result = _schtasks("/Query", "/TN", TASK_NAME, "/XML")
+    result = _schtasks("/Query", "/TN", user_task_name(), "/XML")
     if result.returncode != 0:
         return False
     exe, args = _autostart_parts()
-    text = result.stdout.lower()
-    mode = "--recover-network" if "--recover-network" in args else "--autostart"
-    return exe.lower() in text and str(PROJECT_DIR).lower() in text and mode in text
+    try:
+        root = ET.fromstring(result.stdout)
+    except ET.ParseError:
+        return False
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    def value(path):
+        return root.findtext(path, default="", namespaces=ns)
+    from service.winapi import current_sid
+    sid = current_sid()
+    return (bool(sid) and value("t:Principals/t:Principal/t:UserId") == sid
+            and value("t:Triggers/t:LogonTrigger/t:UserId") == sid
+            and value("t:Principals/t:Principal/t:RunLevel") == "LeastPrivilege"
+            and value("t:Principals/t:Principal/t:LogonType") == "InteractiveToken"
+            and value("t:Actions/t:Exec/t:Command").casefold() == exe.casefold()
+            and value("t:Actions/t:Exec/t:Arguments") == args
+            and value("t:Actions/t:Exec/t:WorkingDirectory").casefold() ==
+            str(PROJECT_DIR).casefold())
 
 
 def set_autostart(enabled: bool) -> None:
-    r"""Задание планировщика (нужны права администратора: оно с наивысшими правами).
+    r"""Собственное интерактивное задание без повышения прав.
     Старый способ — значение в HKCU\...\Run — убирается."""
     if sys.platform != "win32":
         raise OSError("Автозапуск поддерживается только в Windows")
@@ -356,28 +382,30 @@ def set_autostart(enabled: bool) -> None:
         _schtasks("/Delete", "/TN", LEGACY_TASK, "/F")
     if not enabled:
         if autostart_enabled():
-            result = _schtasks("/Delete", "/TN", TASK_NAME, "/F")
+            result = _schtasks("/Delete", "/TN", user_task_name(), "/F")
             if result.returncode != 0:
                 raise OSError((result.stderr or result.stdout).strip())
         return
-    import getpass
     import tempfile
-    user = f"{os.environ.get('USERDOMAIN', '')}\\{getpass.getuser()}".lstrip("\\")
+    from service.winapi import current_sid
+    user = current_sid()
+    if not user:
+        raise OSError("Не удалось определить пользователя автозапуска")
     with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False,
                                      encoding="utf-16") as f:
         f.write(task_xml(user))
         xml_path = f.name
     try:
-        result = _schtasks("/Create", "/TN", TASK_NAME, "/XML", xml_path, "/F")
+        result = _schtasks("/Create", "/TN", user_task_name(), "/XML", xml_path, "/F")
     finally:
         os.unlink(xml_path)
     if result.returncode != 0:
         raise OSError((result.stderr or result.stdout).strip() or
-                      "нужны права администратора")
+                       "не удалось создать задание текущего пользователя")
 
 
 def ensure_autostart() -> None:
-    """При запуске с правами: задание есть всегда (возврат сети после сбоя VPN), а его режим
+    """Задание пользователя есть всегда (возврат сети после сбоя VPN), а его режим
     зависит от настройки «автозапуск всей программы» (startup/autostart): выключена — лёгкий
     --recover-network, включена — вся программа (--autostart)."""
     try:
@@ -390,7 +418,35 @@ def ensure_autostart() -> None:
         if not autostart_current():
             set_autostart(True)
     except OSError:
-        pass  # без прав администратора задание не создать: попробуем в следующий раз
+        pass  # например, планировщик запрещён политикой: повторим при следующем запуске
+
+
+def remove_install_autostart() -> None:
+    """Деинсталляция с правами: задания всех SID, но только для удаляемой копии программы."""
+    result = _schtasks("/Query", "/FO", "CSV", "/NH")
+    if result.returncode != 0:
+        raise OSError("Не удалось прочитать задания автозапуска")
+    exe, _args = _autostart_parts()
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    for row in csv.reader(io.StringIO(result.stdout)):
+        if not row:
+            continue
+        name = row[0].lstrip("\\")
+        if name not in (TASK_NAME, LEGACY_TASK) and not name.startswith(TASK_NAME + "-S-"):
+            continue
+        task = _schtasks("/Query", "/TN", name, "/XML")
+        if task.returncode != 0:
+            continue
+        try:
+            root = ET.fromstring(task.stdout)
+        except ET.ParseError:
+            continue
+        command = root.findtext("t:Actions/t:Exec/t:Command", "", ns)
+        working = root.findtext("t:Actions/t:Exec/t:WorkingDirectory", "", ns)
+        if command.casefold() == exe.casefold() and working.casefold() == str(PROJECT_DIR).casefold():
+            deleted = _schtasks("/Delete", "/TN", name, "/F")
+            if deleted.returncode != 0:
+                raise OSError(f"Не удалось удалить задание {name}")
 
 
 def _remove_run_value() -> None:

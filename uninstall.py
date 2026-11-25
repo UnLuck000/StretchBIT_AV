@@ -150,8 +150,7 @@ def steps(folder: Path, test: bool, wipe: bool = True,
             d.remove_all()
 
     def autostart():
-        if cfg.autostart_current():  # задание запускает именно эту копию
-            cfg.set_autostart(False)
+        cfg.remove_install_autostart()  # все SID, но не задания другой установленной версии
 
     def explorer():
         if cfg.explorer_current():

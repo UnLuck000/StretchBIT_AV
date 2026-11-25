@@ -31,6 +31,10 @@ def test_installer_receives_both_versions(tmp_path, monkeypatch, edition):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     folder = tmp_path / ("StretchBIT" if edition == "release" else "StretchBIT-test")
+    monkeypatch.setattr(build_release, "ROOT", tmp_path)
+    (folder / "app" / "docs").mkdir(parents=True)
+    for name in ("LICENSE", "docs/EULA.txt", "docs/PRIVACY.txt"):
+        (folder / "app" / name).write_text(name, encoding="utf-8")
     result = build_release.make_installer(folder, edition)
     args, kwargs = calls[0]
     assert "/DAppVersion=1.3.0-beta1" in args
@@ -38,6 +42,12 @@ def test_installer_receives_both_versions(tmp_path, monkeypatch, edition):
     assert f"/DEdition={edition}" in args
     assert kwargs["check"] is True
     assert result.name == f"{folder.name}-1.3.0-beta1-setup.exe"
+    from diag import consent
+    import hashlib
+    text = consent.text(folder / "app")
+    assert (tmp_path / "build" / f"installer-legal-{edition}.txt").read_text(
+        encoding="utf-8-sig") == text
+    assert f"/DLegalRevision={hashlib.sha256(text.encode('utf-8')).hexdigest()}" in args
 
 
 def test_inno_uses_explicit_exe_versions_and_has_no_zero_fallback():

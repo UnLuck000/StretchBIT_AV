@@ -8,18 +8,20 @@ r"""Инструменты, меняющие систему, — отдельн�
 по выбору пользователя: такой канал был бы готовым повышением прав. Окно UAC на каждое
 открытие инструмента подтверждает сам пользователь (обойти его без прав нельзя).
 
-    StretchBIT.exe --tool <recovery|autoruns|drivers> [--tab N]  — окно инструмента
+    StretchBIT.exe --tool <recovery|autoruns|drivers|processes> [--tab N] — окно инструмента
     StretchBIT.exe --undo <id записи журнала>                     — отмена с правами
 
-Процесс с правами — та же программа той же учётной записи: журнал действий, настройки — те
-же (%APPDATA%), карантин, журнал защиты и белый список — у службы (подключается к ней сам).
+При вводе credentials другой учётной записи процесс инструмента принадлежит ей.
+Главное окно остаётся у исходного пользователя: его AppData/DPAPI не подменяются.
+Разрешённые вкладки передаются отдельно; общие карантин/журнал защиты — у службы.
 """
 import ctypes
 import os
 import sys
 from ctypes import wintypes
 
-TOOLS = ("recovery", "autoruns", "drivers")
+TOOLS = ("recovery", "autoruns", "drivers", "processes")
+CAPABILITIES = ("memory", "restore", "sfc", "checks")
 ERROR_CANCELLED = 1223
 SEE_MASK_NOCLOSEPROCESS = 0x40
 SW_SHOWNORMAL = 1
@@ -37,11 +39,9 @@ class SHELLEXECUTEINFOW(ctypes.Structure):
 
 
 def wanted(name: str) -> bool:
-    """Открывать ли инструмент процессом с правами: окно без прав и служба работает (без
-    службы окно и так запускается с правами — прежний порядок)."""
-    from service import remote
+    """Права нужны инструменту независимо от наличия службы защиты."""
     from trustseal import is_admin
-    return name in TOOLS and remote.REMOTE is not None and not is_admin()
+    return name in TOOLS and not is_admin()
 
 
 def command(args: list[str]) -> tuple[str, str]:
@@ -85,9 +85,22 @@ def exit_code(handle) -> int | None:
     return code.value
 
 
-def open_tool(name: str, tab: int = 0) -> bool:
-    """True — инструмент открыт процессом с правами; False — пользователь отказался."""
+def tool_arguments(name: str, tab: int = 0, *, allowed=(), action: str | None = None) -> list[str]:
+    """Только известный инструмент, разрешения интерфейса и фиксированные действия."""
+    if name not in TOOLS or any(cap not in CAPABILITIES for cap in allowed):
+        raise ValueError("Неизвестный инструмент или разрешение")
+    if action is not None and (name != "recovery" or action not in ("create", "check")):
+        raise ValueError("Неизвестное действие инструмента")
     args = ["--tool", name] + (["--tab", str(int(tab))] if tab else [])
+    args += [f"--allow-{cap}" for cap in allowed]
+    if action:
+        args += ["--action", action]
+    return args
+
+
+def open_tool(name: str, tab: int = 0, *, allowed=(), action: str | None = None) -> bool:
+    """True — инструмент открыт процессом с правами; False — пользователь отказался."""
+    args = tool_arguments(name, tab, allowed=allowed, action=action)
     handle = start(args)
     if handle is None:
         return False
@@ -108,6 +121,9 @@ def run_tool(argv: list[str]) -> int:
     name = argv[argv.index("--tool") + 1] if argv.index("--tool") + 1 < len(argv) else ""
     if name not in TOOLS:
         return 2
+    from trustseal import is_admin
+    if not is_admin():
+        return 5  # не изображать успешное повышение прав при прямом запуске --tool
     tab = 0
     if "--tab" in argv:
         try:
@@ -115,6 +131,7 @@ def run_tool(argv: list[str]) -> int:
         except (ValueError, IndexError):
             tab = 0
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QTimer
 
     from ui import settings as cfg
     from ui import theme
@@ -126,13 +143,29 @@ def run_tool(argv: list[str]) -> int:
     if name == "recovery":
         from recovery.window import RecoveryWindow
         window = RecoveryWindow()
+        window.set_allowed("--allow-restore" in argv, "--allow-sfc" in argv,
+                           "--allow-checks" in argv)
+        window.tabs.setTabVisible(3, False)  # HKCU-ассоциации меняются в исходном GUI, не у UAC-админа
         window.show_tab(tab)
+        action = argv[argv.index("--action") + 1] if "--action" in argv and \
+            argv.index("--action") + 1 < len(argv) else None
+        if action == "create" and "--allow-restore" in argv:
+            QTimer.singleShot(0, window.create_restore_point)  # подтверждение остаётся в окне
+        elif action == "check" and "--allow-checks" in argv:
+            QTimer.singleShot(0, window.run_system_check)
+        elif "--action" in argv:
+            window.deleteLater()
+            return 2
     elif name == "autoruns":
         from autoruns.window import AutorunsWindow
         window = AutorunsWindow()
-    else:
+    elif name == "drivers":
         from toolbox.driverswindow import DriversWindow
         window = DriversWindow()
+    else:
+        from processmanager.window import ProcessWindow
+        window = ProcessWindow()
+        window.set_memory_allowed("--allow-memory" in argv)
     window.setWindowTitle(window.windowTitle() + " — с правами администратора")
     window.show()
     return app.exec()

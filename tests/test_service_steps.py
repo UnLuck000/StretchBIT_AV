@@ -440,7 +440,8 @@ def test_elevate_helpers(monkeypatch):
     exe, params = elevate.command(["--undo", "a b"])
     assert params.endswith('--undo "a b"') and "gui.py" in params
     monkeypatch.setattr(remote, "REMOTE", None)
-    assert not elevate.wanted("recovery")                 # без службы — как раньше
+    monkeypatch.setattr("trustseal.is_admin", lambda: False)
+    assert elevate.wanted("recovery")                     # права инструменту нужны и без службы
     monkeypatch.setattr(remote, "REMOTE", object())
     monkeypatch.setattr("trustseal.is_admin", lambda: False)
     assert elevate.wanted("autoruns") and not elevate.wanted("vpn")

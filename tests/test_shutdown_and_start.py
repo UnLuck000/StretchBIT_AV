@@ -98,12 +98,11 @@ def test_windivert_from_project_when_run_from_sources(tmp_path, monkeypatch):
     assert not tls._from_project(other)
 
 
-def test_manual_start_asks_for_rights_even_with_service():
-    """Ручной запуск — с окном UAC и при работающей службе; автозапуск, меню Проводника и
-    окно по тревоге службы (--alarm) — без него."""
+def test_manual_start_does_not_switch_gui_to_uac_administrator():
+    """Главное окно не меняет пользователя; системные инструменты повышаются отдельно."""
     source = (Path(__file__).resolve().parent.parent / "gui.py").read_text(encoding="utf-8")
-    line = next(s for s in source.splitlines() if "elevate_on_start()" in s and "if " in s)
-    assert "service_client" not in line and "--alarm" in line and "autostart" in line
+    assert "elevate_on_start" not in source
+    assert 'if "--tool" in sys.argv or "--undo" in sys.argv:' in source
     core = (Path(__file__).resolve().parent.parent / "service" / "core.py").read_text(
         encoding="utf-8")
     assert '"--alarm"' in core

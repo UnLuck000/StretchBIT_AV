@@ -324,7 +324,7 @@ class NetworkMonitor:
                 self._alert(level, "DOMAIN" if found else "DGA", q.pid, q.name,
                             f"DNS-запрос: {verdict}", name, exe)
         if not q.final:  # начало запроса: одно обращение — одно событие для маячков
-            beacon = self.beacons.feed(name, exe, q.name, q.time, "dns") if q.pid else None
+            beacon = self.beacons.feed(name, exe, q.name, q.time, "dns", pid=q.pid) if q.pid else None
             if beacon:
                 self._on_beacon(beacon)
             return  # строка в список добавится с ответом (3008)
@@ -358,7 +358,7 @@ class NetworkMonitor:
             self._alert(level, rule, ev.pid, h.sni or ev.remote,
                         f"TLS: {verdict}; JA3 {h.ja3}", ev.name, ev.exe)
         beacon = self.beacons.feed(ev.name, ev.exe, h.sni or ev.remote.rsplit(":", 1)[0],
-                                   ev.time, "tls")
+                                   ev.time, "tls", pid=ev.pid)
         if beacon:
             self._on_beacon(beacon)
         STORY.contacted(ev.pid, h.sni or ev.remote, "tls", ev.remote if h.sni else "", ev.time)
@@ -370,11 +370,15 @@ class NetworkMonitor:
     # ---------- маячки ----------
     def _on_beacon(self, b: Beacon) -> None:
         self._emit("beacon", b)
+        if b.pid == 4:
+            # PID 4 — ядро Windows: регулярный системный трафик сам по себе не угроза.
+            # Это не исключение для IOC/DOMAIN/SNI/JA3 и не доверие одному имени System.
+            return
         _, signed = self._signature(b.exe)
         if signed:
             return  # обновления и телеметрия подписанных программ: только в списке
-        pid = next((pid for pid, (_, exe, _) in list(self._procs.items())
-                    if exe and exe.lower() == b.exe.lower()), 0)
+        pid = b.pid or next((pid for pid, (_, exe, _) in list(self._procs.items())
+                            if exe and exe.lower() == b.exe.lower()), 0)
         self._alert("warning", "BEACON", pid, b.target,
                     f"маячок: обращения к {b.target} каждые {b.period:.0f} с "
                     f"(разброс {b.cv:.0%}, событий {b.count}, источник {b.source})",
@@ -440,7 +444,7 @@ class NetworkMonitor:
                         target = self._names.get(c.rip) or c.rip
                         STORY.contacted(c.pid, f"{c.rip}:{c.rport}", "tcp",
                                         self._names.get(c.rip, ""), now)
-                        beacon = self.beacons.feed(c.name, c.exe, target, now, "tcp")
+                        beacon = self.beacons.feed(c.name, c.exe, target, now, "tcp", pid=c.pid)
                         if beacon:
                             self._on_beacon(beacon)
                 self._conns = current_conns

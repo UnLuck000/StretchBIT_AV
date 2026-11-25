@@ -93,7 +93,7 @@ class RecoveryWindow(QMainWindow):
         row = QHBoxLayout(banner)
         row.setContentsMargins(0, 0, 0, 0)
         label = QLabel("Без прав администратора большинство функций этого окна недоступно.")
-        button = QPushButton("Перезапустить от имени администратора")
+        button = QPushButton("Открыть это окно с правами администратора")
         button.clicked.connect(self.restart_requested.emit)
         row.addWidget(label, 1)
         row.addWidget(button)
