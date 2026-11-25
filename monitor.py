@@ -173,6 +173,7 @@ class RealtimeMonitor:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._reload = threading.Event()
+        self._folder_request = None
         self._thread: threading.Thread | None = None
         self._signatures = None
         self._rules = None
@@ -191,6 +192,39 @@ class RealtimeMonitor:
     def reload_bases(self):
         """Базы обновились: перечитать их в потоке монитора."""
         self._reload.set()
+
+    def update_folders(self, folders):
+        """Передать новый список в поток монитора, не выключая остальные защиты."""
+        with self._lock:
+            self._folder_request = [Path(f) for f in folders]
+
+    def _replace_observer(self, observer, handler):
+        with self._lock:
+            folders, self._folder_request = self._folder_request, None
+        if folders is None:
+            return observer
+        previous = self.folders
+        replacement = Observer()
+        self.folders = folders
+        try:
+            user, system = self._schedule(replacement, handler)
+            if user + system == 0:
+                raise OSError("нет доступных папок для наблюдения")
+            # Сначала новый наблюдатель: не оставляем окно без наблюдения.
+            replacement.start()
+        except Exception as e:
+            self.folders = previous
+            replacement.stop()
+            if replacement.ident is not None:
+                replacement.join(timeout=5)
+            self._emit("error", f"Не удалось применить папки, прежнее наблюдение сохранено: {e}")
+            return observer
+        observer.stop()
+        observer.join(timeout=5)
+        with self._lock:
+            self._pending = {p: v for p, v in self._pending.items() if self._wanted(p)}
+        self._emit("status", "Защита включена.")
+        return replacement
 
     def _emit(self, kind: str, text: str = ""):
         try:
@@ -284,10 +318,10 @@ class RealtimeMonitor:
                     for existing in folder.rglob("*"):
                         if existing.is_file():
                             self._enqueue(existing)
-        self._emit("status", f"Защита включена. Папок пользователя: {user}, системных: "
-                             f"{system}")
+        self._emit("status", "Защита включена.")
         try:
             while not self._stop.wait(0.5):
+                observer = self._replace_observer(observer, handler)
                 if self._reload.is_set():
                     self._reload.clear()
                     try:

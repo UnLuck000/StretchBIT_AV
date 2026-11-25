@@ -27,6 +27,11 @@ import datadirs
 from mainwindow.common import DEFAULT_WATCH, ID_ROLE, RULES_DIR, SIGNATURES, _dlog
 
 
+def _protection_status(text: str) -> str:
+    # Успешное включение уже показано в заголовке. Скрываем и счётчики старой службы.
+    return "" if text.startswith("Защита включена.") else text
+
+
 class ProtectionMixin:
     """Атрибуты и сигналы — у MainWindow (gui.py)."""
 
@@ -616,14 +621,32 @@ class ProtectionMixin:
         from analyzer.scanpage import documents_dir
         folder = QFileDialog.getExistingDirectory(self, "Папка для наблюдения", documents_dir())
         if folder and not self.watch_list.findItems(folder, Qt.MatchFlag.MatchExactly):
-            self._add_watch_item(folder)
-            self._save_watch_folders()
+            folders = [self.watch_list.item(i).text() for i in range(self.watch_list.count())]
+            self._change_watch_folders([*folders, folder])
 
     def remove_watch_folder(self):
         row = self.watch_list.currentRow()
         if row >= 0:
-            self.watch_list.takeItem(row)
-            self._save_watch_folders()
+            folders = [self.watch_list.item(i).text() for i in range(self.watch_list.count())
+                       if i != row]
+            self._change_watch_folders(folders)
+
+    def _change_watch_folders(self, folders) -> bool:
+        previous = [self.watch_list.item(i).text() for i in range(self.watch_list.count())]
+        if self.monitor is not None:
+            if set(previous) - set(folders) and access.protection_locked():
+                self._off_blocked("наблюдение за папкой")
+                return False
+            try:
+                self.monitor.update_folders(folders)
+            except OSError as e:
+                QMessageBox.warning(self, "Защита файлов", f"Не удалось изменить папки: {e}")
+                return False  # отказ службы не меняет список и настройки окна
+        self.watch_list.clear()
+        for folder in folders:
+            self._add_watch_item(folder)
+        self._save_watch_folders()
+        return True
 
     # ---------- другая версия (релизная/тестовая) ведёт защиту: service/editions.py ----------
     def show_passive(self) -> None:
@@ -788,7 +811,7 @@ class ProtectionMixin:
                 self.apply_guards()
             elif remote:
                 self.monitor.run = status["run"]
-            self.protect_status.setText(status["text"].removeprefix("Защита включена. "))
+            self.protect_status.setText(_protection_status(status["text"]))
             self.refresh_dashboard()
         elif remote:
             self._protection_stopped()
@@ -988,7 +1011,7 @@ class ProtectionMixin:
                 return
             self.monitor = monitor
             self._set_protection_ui(True)
-            self.protect_status.setText(status["text"].removeprefix("Защита включена. "))
+            self.protect_status.setText(_protection_status(status["text"]))
             self.apply_decoys()
             self.apply_guards()
             return
@@ -1012,7 +1035,7 @@ class ProtectionMixin:
         self.protect_btn.setEnabled(True)
         self.protection_page.set_running(running)
         for w in (self.watch_list, self.watch_add_btn, self.watch_remove_btn):
-            w.setEnabled(not running)
+            w.setEnabled(True)
         self.protect_status.setText("Запускаю..." if running else
                                     "Новые и изменённые файлы не проверяются.")
         self.refresh_dashboard()
@@ -1027,7 +1050,7 @@ class ProtectionMixin:
 
     def on_monitor_event(self, kind: str, text: str):
         if kind == "status":  # «Защита включена» уже в заголовке страницы
-            self.protect_status.setText(text.removeprefix("Защита включена. "))
+            self.protect_status.setText(_protection_status(text))
             self.refresh_dashboard()
             return
         if kind == "stopped":

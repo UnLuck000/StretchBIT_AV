@@ -151,6 +151,12 @@ class RemoteMonitor:
         """Refused — выключение запрещено в настройках службы."""
         self.client.call("protection.set", on=False)
 
+    def update_folders(self, folders) -> None:
+        proposed = [str(f) for f in folders]
+        status = self.client.call("protection.set", on=True, folders=proposed)
+        self.folders = proposed
+        self.run = status["run"]
+
     def reload_bases(self) -> None:
         try:
             self.client.call("bases.reload")

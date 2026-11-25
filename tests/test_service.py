@@ -25,7 +25,7 @@ class FakeMonitor:
 
     def start(self):
         self.started = True
-        self.on_event("status", "Защита включена. Папок пользователя: 1, системных: 0")
+        self.on_event("status", "Защита включена.")
 
     def stop(self):
         self.stopped = True
@@ -33,6 +33,9 @@ class FakeMonitor:
 
     def reload_bases(self):
         self.reloaded += 1
+
+    def update_folders(self, folders):
+        self.folders = list(folders)
 
 
 @pytest.fixture
@@ -144,6 +147,7 @@ def test_protection_on_off_and_config_persist(core, tmp_path):
     other = str(tmp_path / "other")
     core.handle(user("S-1-5-21-2"), "protection.set", {"on": True, "folders": [other]})
     assert set(FakeMonitor.instances[-1].folders) == {folder, other}
+    assert len(FakeMonitor.instances) == 1 and not FakeMonitor.instances[0].stopped
     off = core.handle(user(), "protection.set", {"on": False})
     assert not off["running"] and FakeMonitor.instances[-1].stopped
     from service.core import ServiceCore

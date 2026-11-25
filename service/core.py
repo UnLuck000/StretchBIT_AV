@@ -600,7 +600,7 @@ class ServiceCore:
             self.config["enabled"] = True
             self._save_config()
             if self._monitor is not None and changed:
-                self._stop_monitor()
+                self._monitor.update_folders(self.all_folders())
             if self._monitor is None:
                 self._start_monitor()
             return self.op_status(client, {})
