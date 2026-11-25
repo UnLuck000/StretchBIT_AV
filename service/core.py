@@ -53,9 +53,8 @@ def data_dir() -> Path:
         return Path("cache/service-dev").resolve()
     import trustseal
     folder = trustseal.ensure_root() / "service"
-    folder.mkdir(exist_ok=True)
-    trustseal._icacls(str(folder), "/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F",
-                      "*S-1-5-18:(OI)(CI)F")
+    import privatefiles
+    privatefiles.protect_directory(folder, recursive=True, system_only=True)
     return folder
 
 

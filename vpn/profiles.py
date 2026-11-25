@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import userdata
+import privatefiles
 
 PROFILES_FILE = userdata.VPN_PROFILES_DIR / "profiles.dat"  # папка конфигурации
 KINDS = {"vless": "VLESS (Xray)", "wireguard": "WireGuard", "openvpn": "OpenVPN",
@@ -123,17 +124,26 @@ class _Blob(ctypes.Structure):
 
 def _dpapi(data: bytes, protect: bool) -> bytes:
     if sys.platform != "win32":
-        return data
-    crypt32 = ctypes.WinDLL("crypt32")
-    kernel32 = ctypes.WinDLL("kernel32")
+        raise OSError("Защищённое хранилище VPN требует Windows DPAPI")
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    crypt32.CryptProtectData.argtypes = [
+        ctypes.POINTER(_Blob), wintypes.LPCWSTR, ctypes.POINTER(_Blob), ctypes.c_void_p,
+        ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
+    crypt32.CryptUnprotectData.argtypes = [
+        ctypes.POINTER(_Blob), ctypes.c_void_p, ctypes.POINTER(_Blob), ctypes.c_void_p,
+        ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_Blob)]
+    crypt32.CryptProtectData.restype = crypt32.CryptUnprotectData.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
     buf = ctypes.create_string_buffer(data, len(data))
     blob_in = _Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
     blob_out = _Blob()
     fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
     if protect:
-        ok = fn(ctypes.byref(blob_in), "StretchBIT VPN", None, None, None, 0, ctypes.byref(blob_out))
+        ok = fn(ctypes.byref(blob_in), "StretchBIT VPN", None, None, None, 1, ctypes.byref(blob_out))
     else:
-        ok = fn(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out))
+        ok = fn(ctypes.byref(blob_in), None, None, None, None, 1, ctypes.byref(blob_out))
     if not ok:
         raise OSError("DPAPI: не удалось " + ("зашифровать" if protect else "расшифровать"))
     try:
@@ -154,8 +164,5 @@ def load(path: Path = PROFILES_FILE) -> list[Profile]:
 
 
 def save(profiles: list[Profile], path: Path = PROFILES_FILE) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps([asdict(p) for p in profiles], ensure_ascii=False).encode("utf-8")
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(_dpapi(data, protect=True))
-    tmp.replace(path)
+    privatefiles.write_bytes(path, _dpapi(data, protect=True))

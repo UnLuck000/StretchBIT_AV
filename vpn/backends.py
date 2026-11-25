@@ -26,6 +26,7 @@ from pathlib import Path
 from recovery import journal
 from vpn import procguard
 import datadirs
+import privatefiles
 
 TUNNEL_DIR = datadirs.CACHE / "vpn"
 CREATE_NO_WINDOW = 0x08000000
@@ -183,8 +184,8 @@ class WireGuardBackend(Backend):
         self._set(CONNECTING)
         self.name = tunnel_name(profile.name)
         TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        conf = (TUNNEL_DIR / f"{self.name}.conf").resolve()
-        conf.write_text(profile.config, encoding="utf-8")
+        conf = (TUNNEL_DIR / f"{self.name}.conf").absolute()
+        privatefiles.write_text(conf, profile.config, administrators=True)
         self.log(f"WireGuard: устанавливаю туннель {self.name}...")
         result = subprocess.run([self.exe, "/installtunnelservice", str(conf)],
                                 capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
@@ -236,8 +237,8 @@ class OpenVPNBackend(Backend):
     def connect(self, profile) -> None:
         self._set(CONNECTING)
         TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        self.conf = (TUNNEL_DIR / f"{tunnel_name(profile.name)}.ovpn").resolve()
-        self.conf.write_text(profile.config, encoding="utf-8")
+        self.conf = (TUNNEL_DIR / f"{tunnel_name(profile.name)}.ovpn").absolute()
+        privatefiles.write_text(self.conf, profile.config, administrators=True)
         self.proc = subprocess.Popen([self.exe, "--config", str(self.conf), "--verb", "3"],
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                      encoding="utf-8", errors="replace",
@@ -509,8 +510,9 @@ class SingBoxBackend(Backend):
 
     def _write(self, config: dict, name: str) -> Path:
         TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
-        path = (TUNNEL_DIR / name).resolve()
-        path.write_text(json.dumps(config, ensure_ascii=False, indent=1), encoding="utf-8")
+        path = (TUNNEL_DIR / name).absolute()
+        privatefiles.write_text(path, json.dumps(config, ensure_ascii=False, indent=1),
+                                administrators=True)
         self.paths.append(path)
         return path
 

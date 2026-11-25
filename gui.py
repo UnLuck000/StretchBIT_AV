@@ -78,8 +78,27 @@ wincerts.install()
 from diag import features  # noqa: E402 — исправность функций (эталон «Исправно»)
 
 import userdata  # noqa: E402 — настройки и журнал в %APPDATA%\StretchBitConfiguration
+
+
+def _protect_configuration() -> None:
+    try:
+        userdata.protect_config()
+    except OSError:
+        _dlog.exception("Не удалось закрыть доступ к конфигурации")
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None, "Не удалось ограничить доступ к конфигурации StretchBIT.\n"
+                "Запуск отменён, чтобы не сохранять данные без защиты. "
+                "Проверьте права доступа и отсутствие ссылок в папке конфигурации.",
+                "Защита конфигурации", 0x10)
+        raise SystemExit(1) from None
+
+
+_protect_configuration()
 for _line in userdata.migrate():  # прежние данные из папки программы и реестра — туда
     _dlog.info("Конфигурация: %s", _line)
+_protect_configuration()  # перенесённые файлы могли сохранить прежние явные разрешения
 
 
 def _transfer_now() -> bool:

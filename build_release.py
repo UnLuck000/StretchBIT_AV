@@ -36,6 +36,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -287,12 +288,24 @@ def find_iscc() -> Path | None:
     return None
 
 
+def installer_numeric_version(version: str) -> str:
+    """Четыре числовых поля Windows; beta/rc остаются в текстовой версии."""
+    core = version.split("-", 1)[0].split("+", 1)[0]
+    if not re.fullmatch(r"\d+(?:\.\d+){0,3}", core, flags=re.ASCII):
+        raise ValueError(f"Некорректная версия установщика: {version}")
+    parts = [int(part) for part in core.split(".")]
+    if any(part > 65535 for part in parts):
+        raise ValueError(f"Версия установщика выходит за пределы Windows: {version}")
+    return ".".join(str(part) for part in parts + [0] * (4 - len(parts)))
+
+
 def make_installer(folder: Path, edition: str) -> Path:
     """Установщик Inno Setup из готовой папки dist/<версия> (installer.iss)."""
     iscc = find_iscc()
     if iscc is None:
         raise SystemExit("Нет Inno Setup 6 (ISCC.exe): winget install JRSoftware.InnoSetup")
     subprocess.run([str(iscc), "/Q", f"/DEdition={edition}", f"/DAppVersion={appinfo.VERSION}",
+                    f"/DAppNumericVersion={installer_numeric_version(appinfo.VERSION)}",
                     f"/DSourceDir={folder}", f"/DOutputDir={ROOT / 'release'}",
                     str(ROOT / "installer.iss")], check=True, cwd=ROOT)
     return ROOT / "release" / f"{folder.name}-{appinfo.VERSION}-setup.exe"

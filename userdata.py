@@ -56,6 +56,12 @@ ADMIN_DIR = CONFIG_DIR / "admin"
 PROCESS_INFO_FILE = CONFIG_DIR / "process_info.json"
 
 
+def protect_config() -> None:
+    """Закрыть существующие данные и наследование для новых: текущий пользователь и SYSTEM."""
+    import privatefiles
+    privatefiles.protect_directory(CONFIG_DIR, recursive=True)
+
+
 
 def set_root(folder: Path) -> None:
     """Служба Windows (service/core.py): своя папка данных вместо %APPDATA% пользователя —

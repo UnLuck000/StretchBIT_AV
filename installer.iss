@@ -1,5 +1,5 @@
 ; Установщик StretchBIT (Inno Setup 6). Собирается из build_release.py --installer:
-;   ISCC installer.iss /DEdition=release|test /DAppVersion=... /DSourceDir=dist\StretchBIT
+;   ISCC installer.iss /DEdition=release|test /DAppVersion=... /DAppNumericVersion=1.3.0.0 /DSourceDir=dist\StretchBIT
 ; Релизная ставится в C:\Program Files\StretchBIT, тестовая — в C:\Program Files\StretchBIT-test
 ; (свои AppId: не мешают друг другу). Нужны права администратора: папка программы закрыта от
 ; записи. Поверх прежней версии: заменяются только файлы программы — журналы, кэш и карантин
@@ -24,7 +24,10 @@
   #define Edition "release"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.0.0"
+  #error "AppVersion is required. Build with python build_release.py --installer."
+#endif
+#ifndef AppNumericVersion
+  #error "AppNumericVersion is required. Build with python build_release.py --installer."
 #endif
 #ifndef SourceDir
   #define SourceDir "dist\StretchBIT"
@@ -66,6 +69,11 @@ AppId={#AppKey}
 AppName={#DisplayName}
 AppVersion={#AppVersion}
 AppVerName={#DisplayName} {#AppVersion}
+; Числовые поля ресурса EXE не принимают суффикс beta/rc; текстовые сохраняют его.
+VersionInfoVersion={#AppNumericVersion}
+VersionInfoTextVersion={#AppVersion}
+VersionInfoProductVersion={#AppNumericVersion}
+VersionInfoProductTextVersion={#AppVersion}
 AppPublisher=StretchBIT
 DefaultDirName={#InstallDir}
 DisableDirPage=yes

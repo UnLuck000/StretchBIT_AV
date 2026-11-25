@@ -680,8 +680,10 @@ def remove_tun_routes(server: str) -> None:
 
 def write_config(config: dict, folder: Path) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    path = (folder / "xray.json").resolve()
-    path.write_text(json.dumps(config, ensure_ascii=False, indent=1), encoding="utf-8")
+    path = (folder / "xray.json").absolute()
+    import privatefiles
+    privatefiles.write_text(path, json.dumps(config, ensure_ascii=False, indent=1),
+                            administrators=True)
     return path
 
 

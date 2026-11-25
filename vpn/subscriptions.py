@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from vpn import profiles
+import privatefiles
 
 FILE = profiles.PROFILES_FILE.with_name("subscriptions.dat")
 MAX_SIZE = 4 * 1024 * 1024
@@ -76,11 +77,8 @@ def load(path: Path = FILE) -> list[Subscription]:
 
 
 def save(subs: list[Subscription], path: Path = FILE) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps([asdict(s) for s in subs], ensure_ascii=False).encode("utf-8")
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(profiles._dpapi(data, protect=True))
-    tmp.replace(path)
+    privatefiles.write_bytes(path, profiles._dpapi(data, protect=True))
 
 
 def new(name: str, url: str, interval: int = 24) -> Subscription:
