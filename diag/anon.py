@@ -6,7 +6,9 @@
 • IP-адреса этого компьютера (адаптеры, внешний адрес) → %MYIP%, адреса локальной сети
   (10/8, 172.16/12, 192.168/16, 100.64/10, fe80::, fc00::/7) → %LANIP%, MAC-адреса → %MAC%;
 • VPN: адреса серверов (домен и IP) → %VPNSERVER1%..., имена профилей → %PROFILE1%...
-Адреса сайтов, к которым идут запросы, остаются. Имена файлов не меняются.
+В технических текстах имена файлов заменяются SHA-256 известного содержимого.
+Если файл не проверялся, имя скрывается меткой неизвестного хэша. Для отправки
+используется отдельная строгая схема diag.support, не произвольный текст scrub.
 
 Значения регистрируются по ходу работы (register_*): адреса адаптеров — при запуске,
 профили VPN — при запуске и при подключении, внешний адрес — когда программа его узнала.
@@ -23,6 +25,66 @@ _lock = threading.Lock()
 _values: dict[str, str] = {}        # точное значение (в нижнем регистре) → метка
 _order: dict[str, int] = {}         # вид метки → следующий номер
 _pattern: re.Pattern | None = None
+_files: dict[str, str] = {}
+_file_pattern: re.Pattern | None = None
+_basenames: dict[str, str | None] = {}
+FILE_UNKNOWN = "%FILE_SHA256_UNAVAILABLE%"
+PATH_FILE_RE = re.compile(
+    r"""(?:\b[a-z]:[\\/]|\\\\)[^\r\n"'<>|]*?\.[a-z0-9_]{1,12}(?=[\s"'<>|,;:)\]}]|$)""", re.I)
+QUOTED_PATH_RE = re.compile(r"""(["'])(?:[a-z]:[\\/]|\\\\|/)[^"'\r\n]*\1""", re.I)
+PATH_TOKEN_RE = re.compile(r"""(?:\b[a-z]:[\\/]|\\\\)[^\s"'<>|,;)\]}]+""", re.I)
+BARE_FILE_RE = re.compile(
+    r"(?<![\w%])(?:[\w.-]+[\\/])*[\w.-]+\."
+    r"(?:exe|dll|sys|scr|ocx|cpl|msi|msix|ps1|vbs|js|py|yar|yara|bin|dat|"
+    r"docx?|xlsx?|pptx?|pdf|png|jpe?g|gif|bmp|txt|log|jsonl?|ini|zip|csv|ovpn|conf)"
+    r"(?![\w])", re.I)
+
+
+def register_file(path, sha256: str) -> None:
+    """Регистрирует готовый хэш сканера, не читает произвольные файлы из текста логов."""
+    global _file_pattern
+    if not isinstance(sha256, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", sha256):
+        return
+    name = str(path)
+    base = re.split(r"[\\/]", name)[-1].lower()
+    with _lock:
+        if len(_files) >= 4096:
+            _files.clear()
+            _basenames.clear()
+        _files[name.lower()] = sha256.lower()
+        old = _basenames.get(base, sha256.lower())
+        _basenames[base] = sha256.lower() if old == sha256.lower() else None
+        _file_pattern = None
+
+
+def _file_regex():
+    global _file_pattern
+    with _lock:
+        if _file_pattern is None and _files:
+            _file_pattern = re.compile("|".join(re.escape(p) for p in sorted(
+                _files, key=len, reverse=True)), re.I)
+        return _file_pattern
+
+
+def file_hashes(text: str) -> str:
+    pattern = _file_regex()
+    if pattern is not None:
+        text = pattern.sub(lambda m: "SHA256:" + _files.get(m.group().lower(), "UNKNOWN"), text)
+    text = QUOTED_PATH_RE.sub(FILE_UNKNOWN, text)
+    text = PATH_FILE_RE.sub(FILE_UNKNOWN, text)
+    text = PATH_TOKEN_RE.sub(FILE_UNKNOWN, text)  # в том числе файлы без расширения
+    def replace(match):
+        name = re.split(r"[\\/]", match.group())[-1].lower()
+        digest = _basenames.get(name)
+        return "SHA256:" + digest if digest else FILE_UNKNOWN
+    return BARE_FILE_RE.sub(replace, text)
+
+
+def known_file_hashes(text: str) -> list[str]:
+    redacted = file_hashes(text)
+    with _lock:
+        registered = set(_files.values())
+    return sorted(set(re.findall(r"SHA256:([a-f0-9]{64})", redacted)) & registered)
 
 
 def anonymize_user(text: str, env: dict | None = None) -> str:
@@ -159,6 +221,7 @@ def scrub(text: str) -> str:
     """Полное обезличивание строки журнала или отчёта."""
     if not text:
         return text
+    text = file_hashes(text)
     text = anonymize_user(text)
     pattern = _compiled()
     if pattern is not None:
@@ -172,8 +235,11 @@ def scrub(text: str) -> str:
 
 def reset() -> None:
     """Для тестов."""
-    global _pattern
+    global _pattern, _file_pattern
     with _lock:
         _values.clear()
         _order.clear()
         _pattern = None
+        _files.clear()
+        _basenames.clear()
+        _file_pattern = None

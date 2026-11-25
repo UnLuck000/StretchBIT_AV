@@ -142,6 +142,13 @@ def summary(folder: Path) -> str:
     crash = folder / "logs" / "crash.log"
     if crash.is_file() and crash.stat().st_size:
         lines.append(f"  crash.log: {crash.stat().st_size} байт — есть аварийные записи")
+    events = folder / "events.jsonl"
+    if events.is_file():
+        with events.open(encoding="utf-8", errors="replace") as stream:
+            n = sum(1 for line in stream if line.strip())
+        lines.append(f"  технических событий: {n} (без сырых текстов журналов)")
+    if (folder / "crash.json").is_file():
+        lines.append("  crash-report: есть обезличенная сводка аварийного завершения")
     return "\n".join(lines)
 
 

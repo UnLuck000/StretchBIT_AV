@@ -67,7 +67,10 @@ class Finding(str):
         return obj
 
 
-def finding(reason: str | None, digest: str):
+def finding(reason: str | None, digest: str, path: Path | None = None):
+    if path is not None and digest:
+        from diag.anon import register_file
+        register_file(path, digest)
     return Finding(reason, digest) if reason else None
 
 
@@ -84,7 +87,7 @@ def check_file(p: Path, signatures, rules=None,
         cached = verdict_cache.get(p, st, version)
         if cached is not None:
             digest, reason = cached
-            return None if whitelist and digest in whitelist else finding(reason, digest)
+            return None if whitelist and digest in whitelist else finding(reason, digest, p)
     kind = media.plain_media(p, st.st_size)  # видео и аудио: без YARA и эвристики
     if kind and st.st_size > media.MEDIA_HASH_LIMIT:
         digest, reason = "", None  # крупный медиафайл целиком не читается
@@ -103,7 +106,7 @@ def check_file(p: Path, signatures, rules=None,
         reason = overrides.filter_reason(digest, found)
     if version:
         verdict_cache.put(p, st, version, digest, reason)
-    return finding(reason, digest)
+    return finding(reason, digest, p)
 
 
 def hash_verdict(size: int, digest: str, md5: str, signatures) -> str | None:

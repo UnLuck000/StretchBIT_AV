@@ -79,6 +79,18 @@ class FalsePositiveWindow(QMainWindow):
         self.stop_btn.clicked.connect(lambda: self._cancel.set())  # всегда текущий запуск
         row.addWidget(self.stop_btn)
         layout.addLayout(row)
+        hash_row = QHBoxLayout()
+        self.sha256_edit = QLineEdit()
+        self.sha256_edit.setPlaceholderText("SHA-256 из диагностического отчёта (64 символа)")
+        self.sha256_edit.setMaxLength(64)
+        hash_row.addWidget(self.sha256_edit, 1)
+        self.sha256_button = QPushButton("Добавить в глобальные исключения")
+        self.sha256_button.clicked.connect(self.add_sha256)
+        hash_row.addWidget(self.sha256_button)
+        from diag import edition
+        self.sha256_button.setEnabled(edition.is_test())
+        self.sha256_edit.returnPressed.connect(self.add_sha256)
+        layout.addLayout(hash_row)
 
         presets = QHBoxLayout()
         presets.addWidget(QLabel("Заведомо чистые папки:"))
@@ -153,6 +165,30 @@ class FalsePositiveWindow(QMainWindow):
         self.refresh_excluded()
 
     # ---------- выбор и запуск ----------
+    def add_sha256(self) -> None:
+        import re
+        digest = self.sha256_edit.text().strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", digest):
+            QMessageBox.warning(self, "SHA-256", "Введите ровно 64 шестнадцатеричных символа.")
+            return
+        if QMessageBox.question(
+            self, "Глобальное исключение",
+            f"Исключить SHA-256 {digest} из хэшей и YARA во всех будущих сборках?\n\n"
+            "Сам файл здесь не проверялся. Добавляйте только подтверждённые ложные "
+            "срабатывания. Эвристика и остальные слои остаются включены.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            added = overrides.exclude_sha256(digest)
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Глобальное исключение", str(e))
+            return
+        self.status.setText("SHA-256 добавлен в глобальные исключения" if added
+                            else "Этот SHA-256 уже исключён")
+        self.sha256_edit.clear()
+        self.journal_changed.emit()
+
     def _pick_file(self):
         from analyzer.scanpage import documents_dir
         path, _ = QFileDialog.getOpenFileName(self, "Файл", documents_dir())

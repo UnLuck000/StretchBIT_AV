@@ -16,7 +16,7 @@ MAX_REQUEST = 1 << 20          # запрос клиента
 MAX_REPLY = 32 << 20           # ответ службы (журнал защиты со сводками бывает большим)
 PROTOCOL = 2
 
-# уровни прав (service/DESIGN.md)
+# уровни прав; описание — в ветке docs/ai-reference, ai/architecture/SERVICE.md
 READ, CONTROL, WEAKEN, ADMIN = "read", "control", "weaken", "admin"
 
 OPS = {

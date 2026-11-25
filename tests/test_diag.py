@@ -41,7 +41,8 @@ def test_scrub_user_paths(monkeypatch):
     monkeypatch.setenv("USERNAME", "Ivan")
     monkeypatch.setenv("COMPUTERNAME", "IVAN-PC")
     out = anon.scrub(r"C:\Users\Ivan\Desktop\Договор.docx на IVAN-PC")
-    assert out == r"%USERPROFILE%\Desktop\Договор.docx на %COMPUTERNAME%"
+    assert "Договор.docx" not in out
+    assert anon.FILE_UNKNOWN in out and "%COMPUTERNAME%" in out
 
 
 @pytest.fixture

@@ -366,7 +366,7 @@ def check_files(paths, signatures, rules, whitelist: set[str] | None = None,
             cached = verdict_cache.get(p, st, version)
             if cached is not None:
                 digest, reason = cached
-                yield str(path), None if whitelist and digest in whitelist else finding(reason, digest), None
+                yield str(path), None if whitelist and digest in whitelist else finding(reason, digest, p), None
                 continue
         job = _Job(str(path), p, st)
         job.media = media.plain_media(p, st.st_size)  # видео и аудио: без YARA (media.py)
@@ -422,7 +422,7 @@ def check_files(paths, signatures, rules, whitelist: set[str] | None = None,
                 digest, hash_verdict(job.st.st_size, digest, md5, signatures) or analyzed)
             if version:
                 verdict_cache.put(job.p, job.st, version, digest, reason)
-            yield job.path, None if whitelist and digest in whitelist else finding(reason, digest), None
+            yield job.path, None if whitelist and digest in whitelist else finding(reason, digest, job.p), None
     finally:
         for future in futures:
             future.cancel()  # отмена или выход из генератора: ждущие задачи не нужны
@@ -468,7 +468,7 @@ def check_stream(paths, signatures, rules, whitelist: set[str] | None = None,
                     cached = verdict_cache.get(p, st, version)
                     if cached is not None:
                         digest, reason = cached
-                        yield str(path), None if whitelist and digest in whitelist else finding(reason, digest), None
+                        yield str(path), None if whitelist and digest in whitelist else finding(reason, digest, p), None
                         continue
                 job = _Job(str(path), p, st)
                 job.media = media.plain_media(p, st.st_size)
@@ -523,7 +523,7 @@ def check_stream(paths, signatures, rules, whitelist: set[str] | None = None,
                 digest, hash_verdict(job.st.st_size, digest, md5, signatures) or analyzed)
             if version:
                 verdict_cache.put(job.p, job.st, version, digest, reason)
-            yield job.path, None if whitelist and digest in whitelist else finding(reason, digest), None
+            yield job.path, None if whitelist and digest in whitelist else finding(reason, digest, job.p), None
     finally:
         for _, futures in inflight.values():
             for future in futures:

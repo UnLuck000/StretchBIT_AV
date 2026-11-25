@@ -15,6 +15,7 @@
 правила с ложными срабатываниями вместо отключения: отключённое не помогает совсем."""
 import json
 import os
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -157,6 +158,17 @@ def exclude_file(digest: str, path: str, layers: list[str], note: str = "") -> b
     journal.log_action(f"Программа «{os.path.basename(path) or digest[:16]}» исключена из "
                        f"проверки: {what}", "fp_file_include", {"hash": digest, "path": path})
     return True
+
+
+def exclude_sha256(digest: str) -> bool:
+    """Исключение разработчика без исходного файла: только тестовое издание/исходники."""
+    digest = digest.strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", digest):
+        raise ValueError("нужен SHA-256: ровно 64 шестнадцатеричных символа")
+    if target_file() != RELEASE_FILE:
+        raise PermissionError("глобальные исключения доступны только в тестовом издании")
+    return exclude_file(digest, "", ["hash", "yara"],
+                        note="ложное срабатывание: SHA-256 введён разработчиком")
 
 
 def include_file(digest: str) -> bool:

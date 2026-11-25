@@ -14,11 +14,16 @@ if "--scan-worker" in sys.argv:  # собранная программа: раб
     _worker_main()
     sys.exit(0)
 
+if "--crash-report" in sys.argv:  # отдельный процесс: основное окно уже аварийно завершилось
+    from ui.crash_report import main as _crash_report_main
+    sys.exit(_crash_report_main())
+
 if "--watchdog" in sys.argv:  # сторож: перезапуск после нештатного завершения (selfguard.py)
     import selfguard
     try:
         selfguard.watch(int(sys.argv[sys.argv.index("--watchdog") + 1]),
-                        restart=selfguard.NO_RESTART_ARG not in sys.argv)
+                        restart=selfguard.NO_RESTART_ARG not in sys.argv,
+                        recover=selfguard.NO_RECOVERY_ARG not in sys.argv)
     except (ValueError, IndexError):
         pass
     sys.exit(0)
@@ -776,6 +781,10 @@ if __name__ == "__main__":
     if guard.already_running(notify=not autostart, wait=wait, message=message):
         sys.exit(0)
 
+    from ui.eula import ensure_accepted
+    if not ensure_accepted():
+        sys.exit(1)  # до UAC, подключения к службе, запуска защит и регистрации автозапуска
+
     # ручной запуск — сразу с запросом UAC, и при работающей службе: без прав инструменты
     # (диспетчер процессов, память, флешки, расширения, точки восстановления...) только
     # показывают (Windows 10, 14.11.2026). Без окна UAC: автозапуск (задание планировщика),
@@ -784,7 +793,7 @@ if __name__ == "__main__":
     if not autostart and not analyze_path and "--alarm" not in sys.argv and elevate_on_start():
         sys.exit(0)
     # служба Windows установлена и отвечает: защита файлов, карантин и журнал защиты — в ней
-    # (service/DESIGN.md)
+    # (архитектура: ветка docs/ai-reference, ai/architecture/SERVICE.md)
     from service import client as _svc_client
     from service import editions as _editions
     if is_admin():
@@ -820,14 +829,12 @@ if __name__ == "__main__":
     crash.start_session()  # метка сеанса: аварийный выход заметен при следующем запуске
     links = userdata.remove_links() if is_admin() else []  # см. userdata.remove_links
     import selfguard
-    if not passive:
-        # сторож: всегда возвращает сеть после VPN, если программу снимут или она упадёт;
-        # перезапускает её — по настройке protect/selfguard (и только собранную)
-        _restart = bool(cfg.get("protect/selfguard"))
-        selfguard.start(_restart)
-        _guard_timer = QTimer()
-        _guard_timer.timeout.connect(lambda: selfguard.start(_restart))  # сняли — снова
-        _guard_timer.start(30000)
+    # Предложение crash-report нужно и пассивному окну, но оно не должно трогать чужой VPN.
+    _restart = bool(cfg.get("protect/selfguard")) and not passive
+    selfguard.start(_restart, recover=not passive)
+    _guard_timer = QTimer()
+    _guard_timer.timeout.connect(lambda: selfguard.start(_restart, recover=not passive))
+    _guard_timer.start(30000)
     features.begin("app.start")
 
     window = MainWindow()

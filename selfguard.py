@@ -44,6 +44,7 @@ NO_RESTART = datadirs.APP_CACHE / "no_restart"  # ставят установщ�
 INSTALLER_HINTS = ("-setup", "unins0")
 NETWORK_BUDGET = 90.0               # с: на возврат сети после VPN (Celeron: PowerShell медленный)
 NO_RESTART_ARG = "--no-restart"     # сторож только возвращает сеть
+NO_RECOVERY_ARG = "--no-network-recovery"  # пассивная версия: только предложение crash-report
 
 _proc: subprocess.Popen | None = None
 
@@ -59,7 +60,7 @@ def _command(*args: str) -> list[str]:
     return [sys.executable, str(Path(__file__).resolve().parent / "gui.py"), *args]
 
 
-def start(restart: bool = True) -> bool:
+def start(restart: bool = True, recover: bool = True) -> bool:
     """Запустить сторожа для этого процесса (или убедиться, что он жив). restart=False или
     из исходников — сторож только возвращает сеть после VPN, программу не перезапускает."""
     global _proc
@@ -68,6 +69,8 @@ def start(restart: bool = True) -> bool:
     args = ["--watchdog", str(os.getpid())]
     if not (restart and allowed()):
         args.append(NO_RESTART_ARG)
+    if not recover:
+        args.append(NO_RECOVERY_ARG)
     try:
         _proc = subprocess.Popen(_command(*args),
                                  creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
@@ -156,14 +159,16 @@ def _note(text: str) -> None:
         pass
 
 
-def _wait(pid: int) -> None:
+def _wait(pid: int) -> bool:
     k32 = ctypes.windll.kernel32
     k32.OpenProcess.restype = ctypes.c_void_p
     handle = k32.OpenProcess(SYNCHRONIZE, False, pid)
     if not handle:
-        return  # процесса уже нет
+        # Отказ в доступе не означает смерть процесса: не показываем ложный crash-report.
+        import psutil
+        return not psutil.pid_exists(pid)
     try:
-        k32.WaitForSingleObject(ctypes.c_void_p(handle), 0xFFFFFFFF)
+        return k32.WaitForSingleObject(ctypes.c_void_p(handle), 0xFFFFFFFF) == 0
     finally:
         k32.CloseHandle(ctypes.c_void_p(handle))
 
@@ -217,14 +222,31 @@ def recover_network(budget: float = NETWORK_BUDGET, steps=None) -> list[str]:
     return report
 
 
-def watch(pid: int, restart: bool = True) -> None:
+def _offer_crash_report(pid: int) -> None:
+    """Отдельный живой процесс: предложение не зависит от следующего запуска GUI."""
+    from diag import consent
+    if not consent.accepted():
+        return
+    try:
+        subprocess.Popen(_command("--crash-report"), creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS,
+                         close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+    except OSError:
+        _note("не удалось открыть предложение crash-report")
+
+
+def watch(pid: int, restart: bool = True, recover: bool = True) -> None:
     """Тело процесса-сторожа (gui.py --watchdog <PID> [--no-restart])."""
-    _wait(pid)
+    if _wait(pid) is False:
+        return
     time.sleep(1.0)  # выход пишет метку последним действием — дать ей исчезнуть
     if not abnormal_exit(pid):
         return
+    if _forbidden() or _installer_running():
+        return  # установку/удаление не выдаём за сбой
+    _offer_crash_report(pid)  # до длительного возврата сети и до возможного перезапуска
     try:  # сначала сеть: без этого интернет перекрыт, пока программу не запустят вручную
-        done = recover_network()
+        done = recover_network() if recover else []
     except Exception as e:  # noqa: BLE001 — перезапуск важнее
         done = [f"ошибка {e}"]
     if done:

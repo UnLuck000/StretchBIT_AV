@@ -3,7 +3,7 @@
 Нужно для подписи манифеста баз (updater._mirror_manifest, tools/feeds_mirror.py): публичный
 ключ закреплён в программе, закрытый — в Secrets GitHub Actions. Подмена ветки feeds
 без ключа не пройдёт проверку. Доверенный workflow CI имеет доступ к ключу и остаётся
-частью границы доверия (docs/FEEDS_SIGNING.md).
+частью границы доверия (ветка docs/ai-reference, ai/operations/FEEDS_SIGNING.md).
 
 Проверено тестами на векторах RFC 8032 (tests/test_ed25519.py).
 """

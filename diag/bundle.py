@@ -145,9 +145,12 @@ def _snapshot() -> str:
     return scrub("\n".join(lines)) + "\n"
 
 
-def collect(target: Path, progress=None, include_screenshots: bool = False) -> dict:
+def collect(target: Path, progress=None, include_screenshots: bool = False,
+            include_vpn: bool = False) -> dict:
     """Собрать архив в target. Возвращает manifest (с числом файлов по разделам).
-    include_screenshots — включить снимки экрана (PNG не обезличиваются, по умолчанию нет)."""
+    Это старый расширенный ЛОКАЛЬНЫЙ архив разработчика, не формат отправки.
+    Настройки и crash-report используют diag.support.collect с фиксированной схемой.
+    include_screenshots/VPN — только явное отдельное включение, по умолчанию нет."""
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     # что скрывать: свои адреса, профили и серверы VPN (vpn/last_profile в снимке настроек,
@@ -165,7 +168,9 @@ def collect(target: Path, progress=None, include_screenshots: bool = False) -> d
     }
     tmp = target.with_name(target.name + ".part")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-        manifest["files"]["logs"] = _add_folder(z, LOGS, "logs", progress)
+        manifest["files"]["logs"] = _add_folder(
+            z, LOGS, "logs", progress,
+            skip=None if include_vpn else lambda p: p.name.startswith(("vpn-client.log", "vpn-events.jsonl")))
         if SERVICE_LOGS.resolve() != LOGS.resolve():
             count = 0
             for path in sorted(SERVICE_LOGS.glob("service*.log*")):

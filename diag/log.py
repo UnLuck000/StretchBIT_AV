@@ -64,7 +64,26 @@ def setup(worker: bool = False) -> None:
     handler = logging.handlers.RotatingFileHandler(
         LOG_FILE, maxBytes=MAX_BYTES, backupCount=BACKUPS, encoding="utf-8", delay=True)
     handler.setFormatter(_Formatter(FORMAT))
+    handler.addFilter(lambda record: not record.name.startswith("sbit.vpn"))
     log.addHandler(handler)
+    vpn_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "vpn-client.log", maxBytes=MAX_BYTES, backupCount=BACKUPS,
+        encoding="utf-8", delay=True)
+    vpn_handler.addFilter(lambda record: record.name == "sbit.vpn" or record.name.startswith("sbit.vpn."))
+    vpn_handler.setFormatter(_Formatter(FORMAT))
+    log.addHandler(vpn_handler)
+    # Сводки для будущей отправки отделены от сырых локальных логов.
+    from diag import support
+    for kind, filename in support.FILES.items():
+        summary_handler = logging.handlers.RotatingFileHandler(
+            LOG_DIR / filename, maxBytes=support.MAX_BYTES, backupCount=1,
+            encoding="utf-8", delay=True)
+        summary_handler.setFormatter(support.SummaryFormatter())
+        def select(record, kind=kind):
+            vpn = record.name == "sbit.vpn" or record.name.startswith("sbit.vpn.")
+            return vpn if kind == "vpn" else (not vpn and (kind == "extra" or record.levelno >= 40))
+        summary_handler.addFilter(select)
+        log.addHandler(summary_handler)
     log.setLevel(logging.DEBUG if edition.is_test() else logging.INFO)
     log.propagate = False
     _ready = True

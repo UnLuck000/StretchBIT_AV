@@ -103,6 +103,9 @@ DEFAULTS = {
     "update/skipped": "",           # версия, которую пользователь решил пропустить
     "update/shown": "",             # версия, которую уже обрабатывали (чтобы не каждые 5 минут)
     "update/pending": "",           # «1»/«0»: было ли окно в трее перед установкой (возврат после)
+    "privacy/eula_revision": "",    # SHA-256 явно принятого текста, изменение требует нового согласия
+    "support/extra": False,         # добровольная дополнительная диагностика
+    "support/vpn": False,           # отдельное согласие на диагностику VPN
 }
 
 
@@ -111,7 +114,7 @@ DEFAULTS = {
 # запреты): settings.ini пишет любая программа пользователя. Они хранятся отдельно —
 # secure_settings.json под trustseal (защищённая копия в %ProgramData%): файл, изменённый не
 # программой, не действует, пока пользователь не решит при запуске (check_trust_files).
-SECURE_PREFIXES = ("protect/", "lock/", "scan/")
+SECURE_PREFIXES = ("protect/", "lock/", "scan/", "support/")
 SECURE_KEYS = {"startup/autostart", "vpn/autostart", "vpn/xray_path", "vpn/singbox_path",
                "vpn/killswitch", "vpn/direct_apps", "general/block_exit"}
 _secure_lock = threading.RLock()
@@ -256,7 +259,8 @@ def set_(key: str, value) -> None:
     store().setValue(key, value)
 
 
-KEEP_ON_RESET = ("stats/last_scan", "db/last_update", "schedule/last_run", "advanced/warned")
+KEEP_ON_RESET = ("stats/last_scan", "db/last_update", "schedule/last_run", "advanced/warned",
+                 "privacy/eula_revision")
 
 
 def reset() -> None:

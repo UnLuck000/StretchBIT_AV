@@ -422,6 +422,10 @@ class SettingsPage(_UiPage):
             self.lbl_support.setText(self.lbl_support.text() + " В тестовой версии в архив "
                                      "входят ещё комментарии со снимками экрана и статусы "
                                      "проверенных функций.")
+        self.lbl_support.setText(
+            "Локальный технический отчёт об ошибках: без сырых журналов, имён и путей "
+            "файлов, адресов и VPN-профилей. Ничего не отправляется.")
+        self._build_support_group()
         self._all = (self.chk_autostart, self.chk_block_exit,
                      self.chk_on_top, self.cmb_theme, self.spn_threshold,
                      self.spn_workers, self.spn_interval,
@@ -473,7 +477,7 @@ class SettingsPage(_UiPage):
         from PySide6.QtCore import QStandardPaths
         from PySide6.QtWidgets import QFileDialog
 
-        from diag import bundle, features
+        from diag import bundle, features, support
         folder = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить сведения о программе",
                                               str(Path(folder) / bundle.default_name()),
@@ -486,8 +490,8 @@ class SettingsPage(_UiPage):
 
         def job():
             try:
-                manifest = bundle.collect(Path(path))
-                features.step("settings.collect_info", f"файлов: {manifest['files']}")
+                manifest = support.collect(Path(path))
+                features.step("settings.collect_info", f"событий: {manifest['events']}")
                 self.info_collected.emit(path, "")
             except Exception as e:  # noqa: BLE001 — показать пользователю
                 self.info_collected.emit(path, str(e))
@@ -517,6 +521,66 @@ class SettingsPage(_UiPage):
         layout.insertWidget(layout.indexOf(self.group_locks) + 1, group)
         group.setVisible(False)
         self._admin_extra = [*getattr(self, "_admin_extra", []), group]
+
+    def _build_support_group(self) -> None:
+        from diag import support
+        group = QGroupBox("Поддержите разработчика")
+        layout = QVBoxLayout(group)
+        hint = QLabel("Минимальная диагностика описана в EULA. Дополнительные сведения "
+                      "добровольны. Отправка пока не подключена — элементы недоступны.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        details = QPushButton("Что будет отправляться?")
+        details.clicked.connect(lambda: QMessageBox.information(
+            self, "Дополнительная диагностика", support.EXTRA_DETAILS + "\n\n" + support.VPN_DETAILS))
+        layout.addWidget(details)
+        self.chk_support_extra = QCheckBox("Разрешить отправку дополнительных логов программы")
+        self.chk_support_extra.setEnabled(support.SENDING_AVAILABLE)
+        self.chk_support_extra.setChecked(cfg.get("support/extra") and support.SENDING_AVAILABLE)
+        self.chk_support_extra.toggled.connect(self._support_toggle)
+        layout.addWidget(self.chk_support_extra)
+        self.btn_support_send = QPushButton("Отправить дополнительные логи")
+        self.btn_support_send.setEnabled(support.SENDING_AVAILABLE and self.chk_support_extra.isChecked())
+        self.btn_support_send.clicked.connect(lambda: self._send_support(False))
+        layout.addWidget(self.btn_support_send)
+        self.btn_support_vpn = QPushButton("Отправка логов VPN-клиента")
+        self.btn_support_vpn.setEnabled(support.SENDING_AVAILABLE)
+        self.btn_support_vpn.setVisible(self.chk_support_extra.isChecked())
+        self.btn_support_vpn.clicked.connect(lambda: self._send_support(True))
+        layout.addWidget(self.btn_support_vpn)
+        self.add_admin_group(group)
+        self.group_support = group
+
+    def _support_toggle(self, checked: bool) -> None:
+        from diag import support
+        allowed = False
+        if checked and support.SENDING_AVAILABLE:
+            allowed = QMessageBox.question(
+                self, "Согласие на дополнительную диагностику", support.EXTRA_DETAILS,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+        self.chk_support_extra.blockSignals(True)
+        self.chk_support_extra.setChecked(allowed)
+        self.chk_support_extra.blockSignals(False)
+        cfg.set_("support/extra", allowed)
+        if not allowed:
+            cfg.set_("support/vpn", False)
+        self.btn_support_send.setEnabled(allowed and support.SENDING_AVAILABLE)
+        self.btn_support_vpn.setVisible(allowed)
+
+    def _send_support(self, vpn: bool) -> None:
+        from diag import support
+        if not support.SENDING_AVAILABLE or not cfg.get("support/extra"):
+            return  # отключённый UI не является единственной проверкой
+        if vpn:
+            if QMessageBox.question(
+                self, "Отдельное согласие на диагностику VPN", support.VPN_DETAILS,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                return
+            cfg.set_("support/vpn", True)
+        QMessageBox.information(self, "Отправка диагностики",
+                                support.request_send("vpn" if vpn else "extra"))
 
     def set_debug(self, on: bool) -> None:
         """Разделы «Запуск», «Плановая проверка», «Проверка», «Запреты» и «Пароль
@@ -565,6 +629,14 @@ class SettingsPage(_UiPage):
             box.setChecked(cfg.get(key))
         for widget in self._all:
             widget.blockSignals(False)
+        from diag import support
+        self.chk_support_extra.blockSignals(True)
+        self.chk_support_extra.setChecked(cfg.get("support/extra") and support.SENDING_AVAILABLE)
+        self.chk_support_extra.blockSignals(False)
+        self.chk_support_extra.setEnabled(support.SENDING_AVAILABLE)
+        self.btn_support_send.setEnabled(support.SENDING_AVAILABLE and self.chk_support_extra.isChecked())
+        self.btn_support_vpn.setEnabled(support.SENDING_AVAILABLE)
+        self.btn_support_vpn.setVisible(self.chk_support_extra.isChecked())
 
     def _schedule_widgets(self, on: bool) -> None:
         for w in (self.cmb_schedule_kind, self.cmb_schedule_period, self.time_schedule):

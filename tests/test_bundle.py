@@ -56,7 +56,7 @@ def test_test_edition_has_feedback_and_statuses(sandbox, monkeypatch):
     with zipfile.ZipFile(out) as z:
         log = z.read("logs/app.log").decode("utf-8")
         status = json.loads(z.read("features/status.json"))
-    assert f"\\{user}\\" not in log and "%USERPROFILE%" in log      # обезличено
+    assert f"\\{user}\\" not in log and "Desktop" not in log      # пути скрыты
     assert next(s for s in status if s["id"] == "scan.file")["state"] == "verified"
     assert not out.with_name("info.zip.part").exists()
 
@@ -146,4 +146,4 @@ def test_service_logs_in_bundle(sandbox, monkeypatch):
     assert "service-logs/yara_errors.log" not in names and manifest["files"]["service-logs"] == 2
     with zipfile.ZipFile(out) as z:
         log = z.read("service-logs/service.log").decode("utf-8")
-    assert f"\\{user}\\" not in log and "%USERPROFILE%" in log
+    assert f"\\{user}\\" not in log and "C:\\Users\\" not in log

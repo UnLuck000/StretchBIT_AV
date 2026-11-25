@@ -240,8 +240,9 @@ def install_qt_messages() -> None:
         if _crash_file is not None and (kind == QtMsgType.QtFatalMsg or background):
             try:
                 where = f" ({threading.current_thread().name})" if background else ""
+                from diag.anon import scrub
                 _crash_file.write(f"Qt {'fatal' if kind == QtMsgType.QtFatalMsg else 'warning'}"
-                                  f"{where}: {message}\n")
+                                  f"{scrub(where)}: {scrub(message)}\n")
                 _crash_file.flush()
             except (OSError, ValueError):
                 pass
