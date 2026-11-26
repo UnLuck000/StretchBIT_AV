@@ -214,6 +214,8 @@ class ServiceCore:
         self.window_launcher = _launch_window    # (сеанс) → PID окна; тесты подменяют
         self.guards = GuardHost(self.emit_data, guard_factories, wake=self.wake_window)
         self.vpn = VpnHost(self.emit_data, self.folder, vpn_factory)
+        from launcher import Coordinator
+        self.launcher = Coordinator()
 
     # ---------- настройки ----------
     def _load_config(self) -> dict:
@@ -227,6 +229,7 @@ class ServiceCore:
         from service.guards import DEFAULTS
         guards = data.get("guards") if isinstance(data.get("guards"), dict) else {}
         return {"enabled": bool(data.get("enabled", False)),
+                "launcher_allowed": data.get("launcher_allowed") is True,
                 "folders": folders if isinstance(folders, dict) else {},
                 "lock_protection": bool(data.get("lock_protection", False)),
                 "db_last_update": float(data.get("db_last_update", 0.0) or 0.0),
@@ -891,6 +894,21 @@ class ServiceCore:
 
     def op_vpn_release_block(self, client, args):
         return self.vpn.release_block()
+
+    def op_launcher_status(self, client, args):
+        return {"allowed": self.config["launcher_allowed"]}
+
+    def op_launcher_policy(self, client, args):
+        if type(args.get("allowed")) is not bool:
+            raise ValueError("Разрешение launcher должно быть логическим")
+        with self._lock:
+            self.config["launcher_allowed"] = args["allowed"]
+            self._save_config()
+        return self.op_launcher_status(client, {})
+
+    def op_launcher_open(self, client, args):
+        with self._lock:
+            return self.launcher.open(client, args, self.config["launcher_allowed"])
 
 
 def _launch_window(session: int) -> int | None:

@@ -1,12 +1,10 @@
 r"""Инструменты, меняющие систему, — отдельным процессом с правами
 через окно UAC, а не операциями канала службы.
 
-Почему не через службу: всё, что окно без прав может попросить у службы, может попросить и
-вредонос в сеансе пользователя (он внедряется в процесс окна — тот без прав). Для защиты
-это терпимо (операции узкие, ослабляющие — под запретом lock_protection), а центр
-восстановления, сканер автозапуска и драйверы — это удаление ключей реестра, служб и файлов
-по выбору пользователя: такой канал был бы готовым повышением прав. Окно UAC на каждое
-открытие инструмента подтверждает сам пользователь (обойти его без прав нельзя).
+Без явно выданного администратором разрешения launcher эти окна требуют UAC.
+При разрешении установки launcher.Coordinator запускает только известные инструменты
+через службу SYSTEM. Это осознанное делегирование широких системных возможностей,
+а не безусловное добавление произвольных привилегированных операций в канал.
 
     StretchBIT.exe --tool <recovery|autoruns|drivers|processes> [--tab N] — окно инструмента
     StretchBIT.exe --undo <id записи журнала>                     — отмена с правами
@@ -62,6 +60,14 @@ def start(args: list[str]):
     """Запуск с правами. Дескриптор процесса или None (окно UAC закрыли «Нет»)."""
     if sys.platform != "win32":
         return None
+    if getattr(sys, "frozen", False):
+        import deployment
+        import winacl
+        root = deployment.package_root()
+        if not winacl.admin_only(sys.executable)[0] or (
+                not deployment.installed_with_service(root) and (
+                    not deployment.ready(root) or not root.is_relative_to(deployment.program_files()))):
+            raise PermissionError("Сначала настройте защищённую копию программы обычным запуском")
     exe, params = command(args)
     info = SHELLEXECUTEINFOW()
     info.cbSize = ctypes.sizeof(info)
@@ -121,7 +127,7 @@ def _connect_service() -> None:
         remote.install(svc)
 
 
-def run_tool(argv: list[str]) -> int:
+def run_tool(argv: list[str], *, system: bool = False) -> int:
     """--tool: одно окно инструмента; программа завершается, когда его закрыли."""
     name = argv[argv.index("--tool") + 1] if argv.index("--tool") + 1 < len(argv) else ""
     if name not in TOOLS:
@@ -177,7 +183,8 @@ def run_tool(argv: list[str]) -> int:
         from processmanager.window import ProcessWindow
         window = ProcessWindow()
         window.set_memory_allowed("--allow-memory" in argv)
-    window.setWindowTitle(window.windowTitle() + " — с правами администратора")
+    suffix = " — системные права (SYSTEM)" if system else " — с правами администратора"
+    window.setWindowTitle(window.windowTitle() + suffix)
     window.show()
     return app.exec()
 

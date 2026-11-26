@@ -9,6 +9,7 @@ except ImportError:  # не Windows
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 HKU_PREFIX = "HKU\\"
 REG_DWORD = 4
+TARGET_SID = None  # только в проверенном процессе системного инструмента
 
 
 def resolve(hive: str, path: str):
@@ -80,6 +81,8 @@ def list_subkeys(hive: str, path: str) -> list:
 
 def current_sid():
     """SID текущего пользователя или None."""
+    if TARGET_SID is not None:
+        return TARGET_SID
     try:
         result = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
                                 capture_output=True, timeout=10, creationflags=NO_WINDOW)

@@ -356,6 +356,8 @@ def test_zip_contains_readable_eula_next_to_exe(tmp_path, monkeypatch):
     folder = root / "dist" / "StretchBIT"
     folder.mkdir(parents=True)
     (folder / "StretchBIT.exe").write_bytes(b"not executable")
+    (folder / "app").mkdir()
+    (folder / "app" / "edition.txt").write_text("release", encoding="utf-8")
     monkeypatch.setattr(build_release, "ROOT", root)
     archive = build_release.make_zip(folder)
     with zipfile.ZipFile(archive) as z:

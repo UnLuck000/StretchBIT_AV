@@ -9,79 +9,10 @@ from pathlib import Path
 os.chdir(Path(sys._MEIPASS) if getattr(sys, "frozen", False)
          else Path(__file__).resolve().parent)
 
-if "--scan-worker" in sys.argv:  # собранная программа: рабочий процесс проверки (scanner.pool)
-    from scanner.worker import main as _worker_main
-    _worker_main()
-    sys.exit(0)
-
-if "--crash-report" in sys.argv:  # отдельный процесс: основное окно уже аварийно завершилось
-    from ui.crash_report import main as _crash_report_main
-    sys.exit(_crash_report_main())
-
-if "--watchdog" in sys.argv:  # сторож: перезапуск после нештатного завершения (selfguard.py)
-    import selfguard
-    try:
-        selfguard.watch(int(sys.argv[sys.argv.index("--watchdog") + 1]),
-                        restart=selfguard.NO_RESTART_ARG not in sys.argv,
-                        recover=selfguard.NO_RECOVERY_ARG not in sys.argv)
-    except (ValueError, IndexError):
-        pass
-    sys.exit(0)
-
-if "--session-start" in sys.argv:
-    # HKLM Run запускается Windows в каждом вошедшем пользовательском сеансе.
-    # Установщик не выбирает SID/папку будущего пользователя и не выдаёт GUI права.
-    from service import editions as _login_editions
-    if _login_editions.passive():
-        sys.exit(0)
-    from ui import settings as _login_cfg
-    sys.argv.remove("--session-start")
-    sys.argv.append("--autostart" if _login_cfg.autostart_gui_enabled() else "--recover-network")
-
-if "--recover-network" in sys.argv:  # автозапуск: только возврат сети после сбоя VPN
-    import selfguard
-    try:
-        report = selfguard.recover_network()
-        if report:
-            selfguard._note(f"автозапуск: сеть после VPN: {'; '.join(report)}")
-    except Exception as e:  # noqa: BLE001 — автозапуск не должен мешать входу в систему
-        selfguard._note(f"автозапуск: возврат сети не удался: {e}")
-    sys.exit(0)
-
-if "--accept-installed-legal" in sys.argv:
-    from diag import consent as _consent
-    try:
-        _revision = sys.argv[sys.argv.index("--accept-installed-legal") + 1]
-        sys.exit(0 if _consent.accept_from_installer(_revision) else 1)
-    except (IndexError, OSError):
-        sys.exit(1)
-
-if "--set-autostart" in sys.argv:  # установщик: процесс исходного пользователя, не UAC-админа
-    import userdata
-    userdata.protect_config()
-    from ui import settings as _cfg
-    try:
-        on = sys.argv[sys.argv.index("--set-autostart") + 1] == "on"
-    except IndexError:
-        sys.exit(2)
-    try:
-        _cfg.set_("startup/autostart", on)
-        _cfg.set_autostart(True)  # задание входа есть всегда: аргументы — по настройке
-    except OSError:
-        pass
-    sys.exit(0)
-
-if any(a.startswith("--service") for a in sys.argv[1:]):
-    # служба Windows и её установка (service/main.py): до Qt и папки конфигурации
-    # пользователя — у службы свои данные в ProgramData
-    if sys.stdout is None or sys.stderr is None:
-        import datadirs
-        datadirs.LOGS.mkdir(parents=True, exist_ok=True)
-        _log = open(datadirs.LOGS / "service-stdout.log", "a", encoding="utf-8", buffering=1)
-        sys.stdout = sys.stdout or _log
-        sys.stderr = sys.stderr or _log
-    from service.main import entry as _service_entry
-    sys.exit(_service_entry(sys.argv[1:]))
+from bootstrap import dispatch  # noqa: E402 — роли должны выбираться до пользовательского состояния
+_role_exit = dispatch(sys.argv)
+if _role_exit is not None:
+    sys.exit(_role_exit)
 
 if sys.stdout is None or sys.stderr is None:  # pythonw или exe без консоли
     import datadirs
@@ -824,6 +755,8 @@ if __name__ == "__main__":
         # вернуть свою, иначе окно запустило бы защиты у себя (service/editions.py)
         _editions.revive_own()
     service_client = _svc_client.connect()
+    import launcher
+    launcher.configure(service_client)
     if service_client is not None:
         from service import remote as _svc_remote
         _svc_remote.install(service_client)  # до окна: оно сразу читает карантин и журнал

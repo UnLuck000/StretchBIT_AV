@@ -48,6 +48,7 @@ def test_process_manager_opens_locally_without_uac(monkeypatch):
     monkeypatch.setattr(access, "allowed", lambda key: True)
     window = SimpleNamespace(tool_blocked=lambda key: False, proc_window=None,
                              _open_elevated=lambda name: calls.append(name) or True,
+                             _open_session_tool=lambda *args: False,
                              apply_on_top=lambda on: None)
     ToolsMixin.open_process_manager(window)
     assert calls == [] and window.proc_window is local
@@ -80,7 +81,8 @@ def test_elevation_passes_original_ui_permissions(monkeypatch):
     calls = []
     monkeypatch.setattr(elevate, "open_tool",
                         lambda *args, **kwargs: calls.append((args, kwargs)) or True)
-    window = SimpleNamespace(statusBar=lambda: SimpleNamespace(showMessage=lambda *args: None))
+    window = SimpleNamespace(statusBar=lambda: SimpleNamespace(showMessage=lambda *args: None),
+                             _open_session_tool=lambda *args: False)
     assert ToolsMixin._open_elevated(window, "processes")
     assert calls[-1][1]["allowed"] == []
     assert ToolsMixin._open_elevated(window, "recovery", 1)

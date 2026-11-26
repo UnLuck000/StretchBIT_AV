@@ -139,8 +139,9 @@ def test_original_user_receipt_does_not_depend_on_gui_launch_checkbox():
                    in line)
     assert "postinstall" not in receipt and "Tasks:" not in receipt
     gui = (ROOT / "gui.py").read_text(encoding="utf-8")
-    assert gui.index('if "--accept-installed-legal" in sys.argv:') < gui.index(
-        "from diag import log as diag_log")
+    assert gui.index("dispatch(sys.argv)") < gui.index("from diag import log as diag_log")
+    bootstrap = (ROOT / "bootstrap.py").read_text(encoding="utf-8")
+    assert 'if "--accept-installed-legal" in argv:' in bootstrap
 
 
 def test_uninstall_removes_user_tasks_only_for_its_own_install(monkeypatch):

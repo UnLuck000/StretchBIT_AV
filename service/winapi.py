@@ -4,6 +4,7 @@ import ctypes
 import os
 import sys
 import time
+from contextlib import contextmanager
 from ctypes import wintypes
 
 INVALID_HANDLE = ctypes.c_void_p(-1).value
@@ -443,6 +444,159 @@ def launch_in_session(session: int, exe: str, args: str = "") -> int:
         if env:
             userenv.DestroyEnvironmentBlock(env)
         k32().CloseHandle(token)
+
+
+@contextmanager
+def session_token(session: int):
+    """Маркер пользователя конкретного сеанса; доступно службе SYSTEM, не обычному GUI."""
+    wts = ctypes.WinDLL("wtsapi32", use_last_error=True)
+    wts.WTSQueryUserToken.argtypes = [wintypes.ULONG, ctypes.POINTER(wintypes.HANDLE)]
+    wts.WTSQueryUserToken.restype = wintypes.BOOL
+    token = wintypes.HANDLE()
+    if session <= 0 or not wts.WTSQueryUserToken(session, ctypes.byref(token)):
+        raise os_error(text="не получен пользовательский маркер сеанса")
+    try:
+        yield token
+    finally:
+        k32().CloseHandle(token)
+
+
+def token_sid(token) -> str:
+    user = _token_info(token, 1)
+    return sid_string(ctypes.c_void_p.from_buffer(user).value) if user else ""
+
+
+def process_sid(pid: int) -> str:
+    a, k = advapi(), k32()
+    a.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                   ctypes.POINTER(wintypes.HANDLE)]
+    process = k.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not process:
+        return ""
+    token = wintypes.HANDLE()
+    try:
+        if not a.OpenProcessToken(process, TOKEN_QUERY, ctypes.byref(token)):
+            return ""
+        return token_sid(token)
+    finally:
+        if token:
+            k.CloseHandle(token)
+        k.CloseHandle(process)
+
+
+def handle_owner_sid(handle) -> str:
+    """Владелец pipe подтверждается ядром: user не может назначить своему pipe владельца SYSTEM."""
+    a = advapi()
+    a.GetSecurityInfo.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    owner, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    # Named pipe — файловый объект Windows (SE_FILE_OBJECT).
+    code = a.GetSecurityInfo(handle, 1, 1, ctypes.byref(owner), None, None, None,
+                             ctypes.byref(descriptor))
+    if code:
+        return ""
+    try:
+        return sid_string(owner.value)
+    finally:
+        k32().LocalFree(descriptor)
+
+
+def launch_system_in_session(session: int, exe: str, args: str, expected_sid: str) -> int:
+    """Только служба: фиксированный инструмент SYSTEM в проверенном пользовательском сеансе."""
+    if current_sid() != "S-1-5-18":
+        raise PermissionError("Привилегированный запуск разрешён только службе SYSTEM")
+    with session_token(session) as interactive:
+        if token_sid(interactive) != expected_sid:
+            raise PermissionError("Пользователь сеанса изменился")
+    a, k = advapi(), k32()
+    H, D = wintypes.HANDLE, wintypes.DWORD
+    a.OpenProcessToken.argtypes = [H, D, ctypes.POINTER(H)]
+    a.DuplicateTokenEx.argtypes = [H, D, ctypes.c_void_p, ctypes.c_int,
+                                   ctypes.c_int, ctypes.POINTER(H)]
+    a.SetTokenInformation.argtypes = [H, ctypes.c_int, ctypes.c_void_p, D]
+    a.CreateProcessAsUserW.argtypes = [
+        H, wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wintypes.BOOL,
+        D, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(STARTUPINFOW),
+        ctypes.POINTER(PROCESS_INFORMATION)]
+    original, primary = H(), H()
+    if not a.OpenProcessToken(k.GetCurrentProcess(), 0x2 | TOKEN_QUERY, ctypes.byref(original)):
+        raise os_error(text="маркер службы не открыт")
+    try:
+        if not a.DuplicateTokenEx(original, 0x02000000, None, 2, 1, ctypes.byref(primary)):
+            raise os_error(text="маркер launcher не создан")
+    finally:
+        k.CloseHandle(original)
+    env = ctypes.c_void_p()
+    userenv = ctypes.WinDLL("userenv", use_last_error=True)
+    userenv.CreateEnvironmentBlock.argtypes = [ctypes.POINTER(ctypes.c_void_p), H, wintypes.BOOL]
+    userenv.DestroyEnvironmentBlock.argtypes = [ctypes.c_void_p]
+    try:
+        value = D(session)
+        if not a.SetTokenInformation(primary, 12, ctypes.byref(value), ctypes.sizeof(value)):
+            raise os_error(text="сеанс launcher не установлен")
+        # Окружение SYSTEM: не наследовать PATH/PYTHONPATH вызывающего пользователя.
+        if not userenv.CreateEnvironmentBlock(ctypes.byref(env), primary, False):
+            raise os_error(text="окружение launcher не создано")
+        startup = STARTUPINFOW()
+        startup.cb, startup.lpDesktop = ctypes.sizeof(startup), "winsta0\\default"
+        info = PROCESS_INFORMATION()
+        command = ctypes.create_unicode_buffer(f'"{exe}" {args}')
+        if not a.CreateProcessAsUserW(primary, exe, command, None, None, False,
+                                      CREATE_UNICODE_ENVIRONMENT, env, os.path.dirname(exe),
+                                      ctypes.byref(startup), ctypes.byref(info)):
+            raise os_error(text="системный инструмент не запущен")
+        k.CloseHandle(info.hThread)
+        k.CloseHandle(info.hProcess)
+        return info.dwProcessId
+    finally:
+        if env:
+            userenv.DestroyEnvironmentBlock(env)
+        k.CloseHandle(primary)
+
+
+@contextmanager
+def interactive_user_context(session: int, expected_sid: str):
+    """HKCU и пользовательские пути инструмента — исходного user, токен и PATH — SYSTEM.
+
+    DPAPI пользователя не имитируется: его профили остаются в GUI. Это отдельный
+    доверенный процесс инструмента с машинным хранилищем, не изменение окружения службы.
+    """
+    import winreg
+    import usercontext
+    with session_token(session) as token:
+        if token_sid(token) != expected_sid:
+            raise PermissionError("SID пользователя сеанса не совпал")
+        paths = {"APPDATA": usercontext.known_folder(usercontext.ROAMING, token),
+                 "LOCALAPPDATA": usercontext.known_folder(usercontext.LOCAL, token),
+                 "USERPROFILE": usercontext.known_folder(
+                     "5E6C858F-0E22-4760-9AFE-EA3317B67173", token)}
+    old = {key: os.environ.get(key) for key in paths}
+    a = advapi()
+    a.RegOverridePredefKey.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    a.RegOverridePredefKey.restype = wintypes.LONG
+    hkcu = ctypes.c_void_p(ctypes.c_int32(0x80000001).value)
+    with winreg.OpenKey(winreg.HKEY_USERS, expected_sid, 0,
+                        winreg.KEY_READ | winreg.KEY_WRITE) as key:
+        code = a.RegOverridePredefKey(hkcu, int(key))
+        if code:
+            raise os_error(code, "HKCU исходного пользователя не подключён")
+        try:
+            os.environ.update({key: str(value) for key, value in paths.items()})
+            from recovery import registry
+            original_sid = registry.TARGET_SID
+            registry.TARGET_SID = expected_sid
+            try:
+                yield
+            finally:
+                registry.TARGET_SID = original_sid
+        finally:
+            a.RegOverridePredefKey(hkcu, None)
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def available() -> bool:

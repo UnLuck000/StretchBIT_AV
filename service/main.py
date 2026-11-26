@@ -41,6 +41,11 @@ def _install() -> int:
         print("Службу ставит только собранная программа (StretchBIT.exe), не исходники. "
               "Для разработки: python -m service --console")
         return 2
+    import deployment
+    import winacl
+    if not deployment.installed_with_service() or not winacl.admin_only(sys.executable)[0]:
+        print("Служба SCM устанавливается только защищённой копией через Installer.")
+        return 5
     name = protocol.service_name()
     what = scm.install(name, protocol.display_name(), protocol.DESCRIPTION,
                        scm.command_line())
@@ -77,6 +82,28 @@ def entry(argv: list[str]) -> int:
         return editions.activate()
     if "--service-stop" in argv:
         print("остановлена" if scm.stop(name) else "не работала")
+        return 0
+    if "--service-launcher-policy" in argv:
+        from service.client import ServiceClient, ServiceUnavailable
+        try:
+            value = argv[argv.index("--service-launcher-policy") + 1]
+            if value not in ("on", "off"):
+                return 2
+        except IndexError:
+            return 2
+        client = ServiceClient()
+        try:
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    client.call("launcher.policy", allowed=value == "on")
+                    break
+                except ServiceUnavailable:
+                    if time.monotonic() >= deadline:
+                        return 1
+                    time.sleep(0.2)  # служба только что установлена и ещё открывает канал
+        finally:
+            client.close()
         return 0
     folder, log = _prepare()
     if "--service-console" in argv:

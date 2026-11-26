@@ -40,6 +40,9 @@ def test_installer_receives_both_versions(tmp_path, monkeypatch, edition):
     assert "/DAppVersion=1.3.0-beta1" in args
     assert "/DAppNumericVersion=1.3.0.0" in args
     assert f"/DEdition={edition}" in args
+    mode = tmp_path / "build" / f"installer-mode-{edition}.json"
+    assert f"/DInstallModeFile={mode}" in args
+    assert '"installed_with_service": true' in mode.read_text(encoding="utf-8")
     assert kwargs["check"] is True
     assert result.name == f"{folder.name}-1.3.0-beta1-setup.exe"
     from diag import consent

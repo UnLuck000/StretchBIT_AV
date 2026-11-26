@@ -29,6 +29,10 @@ def other_name() -> str:
 
 def other_title() -> str:
     """Как называть другую версию пользователю."""
+    if getattr(sys, "frozen", False):
+        import deployment
+        if not deployment.installed_with_service():
+            return "установленная копия StretchBIT"
     return "StretchBIT (релизная)" if edition.is_test() else "StretchBIT (тест)"
 
 
@@ -46,6 +50,10 @@ def passive() -> bool:
     if not getattr(sys, "frozen", False) or sys.platform != "win32":
         return False
     try:
+        import deployment
+        if not deployment.installed_with_service():
+            from archive_runtime import conflicting_service
+            return conflicting_service()
         return other_active()
     except OSError:
         return False
@@ -56,6 +64,9 @@ def revive_own() -> bool:
     версии, а ту потом удалили), и другая не работает: вернуть свою — автозапуск и запуск.
     Нужны права администратора. True — служба запущена, окну подключаться к ней."""
     if not getattr(sys, "frozen", False) or sys.platform != "win32":
+        return False
+    import deployment
+    if not deployment.installed_with_service():
         return False
     from service import scm
     try:
@@ -71,6 +82,11 @@ def activate(log=print) -> int:
     """Сделать эту версию основной (нужны права администратора): служба другой версии —
     остановить и в ручной запуск, своя — автозапуск и запустить. 0 — успех."""
     from service import scm
+    if getattr(sys, "frozen", False):
+        import deployment
+        if not deployment.installed_with_service():
+            log("Архивная копия использует задачу SYSTEM. Служба другой копии автоматически не останавливается.")
+            return 3
     other, own = other_name(), own_name()
     if scm.set_start_type(other, scm.SERVICE_DEMAND_START):
         scm.stop(other)

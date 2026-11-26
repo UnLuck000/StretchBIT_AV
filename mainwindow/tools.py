@@ -43,6 +43,8 @@ class ToolsMixin:
             return False  # файловые ассоциации относятся к HKCU исходного пользователя
         if not elevate.wanted(name):
             return False
+        if self._open_session_tool(name, tab, action):
+            return True
         allowed = []
         if name == "processes" and access.allowed("btnMemoryDeep"):
             allowed.append("memory")
@@ -62,6 +64,19 @@ class ToolsMixin:
                                      "и действий может быть недоступна", 10000)
         return False
 
+    def _open_session_tool(self, name: str, tab: int = 0, action: str | None = None) -> bool:
+        """Разрешённый установкой координатор, без смены токена GUI и повторных UAC."""
+        if name == "recovery" and tab == 3:
+            return False
+        import launcher
+        allowed = []
+        if name == "processes" and access.allowed("btnMemoryDeep"):
+            allowed.append("memory")
+        if name == "recovery":
+            allowed = [cap for cap, button in (("restore", "btnRestorePoint"),
+                       ("sfc", "btnSfcDism"), ("checks", "btnSystemChecks")) if access.allowed(button)]
+        return launcher.try_open(name, tab, allowed=allowed, action=action)
+
     def _restart_tool_as_admin(self, name: str, attribute: str) -> None:
         window = getattr(self, attribute)
         tab = window.tabs.currentIndex() if name == "recovery" and window is not None else 0
@@ -72,6 +87,8 @@ class ToolsMixin:
 
     def open_recovery(self, tab: int = 0, action: str | None = None):
         if tab in self.TAB_TOOLS and self.tool_blocked(self.TAB_TOOLS[tab]):
+            return
+        if self.recovery_window is None and self._open_session_tool("recovery", tab, action):
             return
         if action == "create" and self._open_elevated("recovery", tab, action):
             return
@@ -163,6 +180,8 @@ class ToolsMixin:
             return
         from toolbox import windows
         window = self.tool_windows.get(name)
+        if window is None and name == "drivers" and self._open_session_tool("drivers"):
+            return
         if window is None:
             # окна без владельца: не держатся поверх главного окна, его можно вывести вперёд
             if name == "link":
@@ -201,6 +220,8 @@ class ToolsMixin:
             return
         if self.tool_blocked("btnAutoruns"):
             return
+        if self.autoruns_window is None and self._open_session_tool("autoruns"):
+            return
         if self.autoruns_window is None:
             self.autoruns_window = AutorunsWindow()
             self.autoruns_window.analyze_requested.connect(lambda path: self.open_analyzer(path))
@@ -217,6 +238,8 @@ class ToolsMixin:
 
     def open_process_manager(self):
         if self.tool_blocked("btnProcessManager"):
+            return
+        if self.proc_window is None and self._open_session_tool("processes"):
             return
         if self.proc_window is None:
             self.proc_window = ProcessWindow()

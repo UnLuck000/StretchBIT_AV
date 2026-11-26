@@ -262,18 +262,74 @@ def make_editions() -> dict[str, Path]:
                 shutil.rmtree(target)
             shutil.copytree(DIST, target)
         (target / "app" / "edition.txt").write_text(edition, encoding="utf-8")
+        (target / "app" / "install-mode.json").write_text(
+            '{"installed_with_service": false}\n', encoding="utf-8")
         folders[edition] = target
     return folders
 
 
-def make_zip(folder: Path) -> Path:
+def prepare_archive(folder: Path) -> None:
     # Текст виден рядом с EXE ещё до запуска; рабочая копия для диалога лежит в app/docs.
     shutil.copy2(ROOT / "docs" / "EULA.txt", folder / "EULA.txt")
     shutil.copy2(ROOT / "LICENSE", folder / "LICENSE")
     shutil.copy2(ROOT / "docs" / "PRIVACY.txt", folder / "PRIVACY.txt")
+    from deployment import MANIFEST
+    if (folder / "archive-ready.json").exists():
+        raise ValueError("Нельзя архивировать уже настроенную рабочую копию")
+    for name in ("cache", "logs", "reports", "quarantine_data", "vpn_profiles", "journal"):
+        directory = folder / "app" / name
+        if directory.exists() and any(path.is_file() for path in directory.rglob("*")):
+            raise ValueError(f"В сборке найдены рабочие данные: app/{name}")
+    edition_file = folder / "app" / "edition.txt"
+    edition = edition_file.read_text(encoding="utf-8").strip()
+    if edition not in ("release", "test"):
+        raise ValueError("Неизвестная редакция архивной сборки")
+    (folder / "app" / "install-mode.json").write_text(
+        '{"installed_with_service": false}\n', encoding="utf-8")
+    files = {}
+    for path in sorted(folder.rglob("*")):
+        if path.is_symlink():
+            raise ValueError("Ссылки не включаются в архив программы")
+        if path.is_file() and path.name not in (MANIFEST, "archive-ready.json"):
+            files[path.relative_to(folder).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    (folder / MANIFEST).write_text(json.dumps(
+        {"format": 1, "edition": edition, "version": appinfo.VERSION, "files": files},
+        ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def make_zip(folder: Path) -> Path:
+    prepare_archive(folder)
     out = ROOT / "release" / f"{folder.name}-{appinfo.VERSION}"
     out.parent.mkdir(exist_ok=True)
     return Path(shutil.make_archive(str(out), "zip", folder.parent, folder.name))
+
+
+def find_rar() -> Path | None:
+    found = shutil.which("rar.exe") or shutil.which("rar")
+    if found:
+        return Path(found)
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+        if base and (Path(base) / "WinRAR" / "Rar.exe").is_file():
+            return Path(base) / "WinRAR" / "Rar.exe"
+    return None
+
+
+def make_rar(folder: Path) -> Path:
+    rar = find_rar()
+    if rar is None:
+        raise SystemExit("Для --rar нужен установленный Rar.exe из WinRAR с подходящей лицензией")
+    prepare_archive(folder)
+    out = ROOT / "release" / f"{folder.name}-{appinfo.VERSION}.rar"
+    out.parent.mkdir(exist_ok=True)
+    import uuid
+    temporary = out.with_name(f".{out.stem}-{uuid.uuid4().hex}.rar")
+    try:
+        subprocess.run([str(rar), "a", "-r", "-ma5", "-m5", "-idq", str(temporary), folder.name],
+                       cwd=folder.parent, check=True)
+        temporary.replace(out)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return out
 
 
 def find_iscc() -> Path | None:
@@ -310,10 +366,13 @@ def make_installer(folder: Path, edition: str) -> Path:
     legal_file = ROOT / "build" / f"installer-legal-{edition}.txt"
     legal_file.parent.mkdir(parents=True, exist_ok=True)
     legal_file.write_text(legal_text, encoding="utf-8-sig")
+    mode_file = legal_file.with_name(f"installer-mode-{edition}.json")
+    mode_file.write_text('{"installed_with_service": true}\n', encoding="utf-8")
     legal_revision = hashlib.sha256(legal_text.encode("utf-8")).hexdigest()
     subprocess.run([str(iscc), "/Q", f"/DEdition={edition}", f"/DAppVersion={appinfo.VERSION}",
                     f"/DAppNumericVersion={installer_numeric_version(appinfo.VERSION)}",
                     f"/DLegalFile={legal_file}", f"/DLegalRevision={legal_revision}",
+                    f"/DInstallModeFile={mode_file}",
                     f"/DSourceDir={folder}", f"/DOutputDir={ROOT / 'release'}",
                     str(ROOT / "installer.iss")], check=True, cwd=ROOT)
     return ROOT / "release" / f"{folder.name}-{appinfo.VERSION}-setup.exe"
@@ -322,6 +381,8 @@ def make_installer(folder: Path, edition: str) -> Path:
 def main() -> None:
     if "--installer" in sys.argv and find_iscc() is None:
         raise SystemExit("Нет Inno Setup 6 (ISCC.exe): winget install JRSoftware.InnoSetup")
+    if "--rar" in sys.argv and find_rar() is None:
+        raise SystemExit("Для --rar нужен Rar.exe из установленного WinRAR; он не входит в программу")
     check_windivert()
     merge_test_baseline()
     merge_test_exclusions()
@@ -334,11 +395,15 @@ def main() -> None:
     sign([DIST / f"{NAME}.exe", *sorted((DIST / "app" / "native" / "amsi" / "bin").glob("*.dll"))])
     made = []
     for edition, folder in make_editions().items():
+        prepare_archive(folder)  # dist тоже пригоден для первого архивного запуска
         size = sum(p.stat().st_size for p in folder.rglob("*") if p.is_file()) / 2 ** 20
         print(f"Готово ({edition}): {folder} ({size:.0f} МБ)")
         if "--zip" in sys.argv:
             made.append(make_zip(folder))
             print("Архив:", made[-1])
+        if "--rar" in sys.argv:
+            made.append(make_rar(folder))
+            print("RAR:", made[-1])
         if "--installer" in sys.argv:
             installer = make_installer(folder, edition)
             sign([installer])

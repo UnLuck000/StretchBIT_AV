@@ -350,6 +350,8 @@ class SettingsPage(_UiPage):
         self.group_startup.setVisible(False)
         self.group_schedule.setVisible(False)
         self.chk_block_exit = child(ui, QCheckBox, "chkBlockExit")
+        self.chk_launcher = child(ui, QCheckBox, "chkPrivilegedLauncher")
+        self.lbl_launcher_warning = child(ui, QLabel, "lblLauncherWarning")
         self.chk_on_top = child(ui, QCheckBox, "chkOnTop")
         self.cmb_theme = child(ui, QComboBox, "cmbTheme")
         self.cmb_theme.clear()  # список тем задаётся в ui/theme.py
@@ -428,7 +430,7 @@ class SettingsPage(_UiPage):
             "Локальный технический отчёт об ошибках: без сырых журналов, имён и путей "
             "файлов, адресов и VPN-профилей. Ничего не отправляется.")
         self._build_support_group()
-        self._all = (self.chk_autostart, self.chk_block_exit,
+        self._all = (self.chk_autostart, self.chk_launcher, self.chk_block_exit,
                      self.chk_on_top, self.cmb_theme, self.spn_threshold,
                      self.spn_workers, self.spn_interval,
                      self.chk_decoys, self.cmb_scan_mode, self.chk_ecores,
@@ -441,6 +443,7 @@ class SettingsPage(_UiPage):
         guard_wheel(ui)  # колесо над полем прокручивает страницу, значение — после щелчка
 
         self.chk_autostart.toggled.connect(self._on_autostart)
+        self.chk_launcher.toggled.connect(self._on_launcher)
         self.chk_block_exit.toggled.connect(lambda v: self._save("general/block_exit", v))
         self.chk_on_top.toggled.connect(lambda v: self._save("general/on_top", v))
         self.chk_decoys.toggled.connect(lambda v: self._save("protect/decoys", v))
@@ -597,6 +600,8 @@ class SettingsPage(_UiPage):
         for widget in self._all:
             widget.blockSignals(True)
         self.chk_autostart.setChecked(cfg.autostart_gui_enabled())
+        self.chk_launcher.setChecked(cfg.get("startup/privileged_launcher"))
+        self.lbl_launcher_warning.setVisible(not self.chk_launcher.isChecked())
         self.chk_block_exit.setChecked(cfg.get("general/block_exit"))
         self.chk_on_top.setChecked(cfg.get("general/on_top"))
         self.chk_decoys.setChecked(cfg.get("protect/decoys"))
@@ -689,6 +694,10 @@ class SettingsPage(_UiPage):
             self.chk_autostart.blockSignals(True)
             self.chk_autostart.setChecked(previous)
             self.chk_autostart.blockSignals(False)
+
+    def _on_launcher(self, checked: bool) -> None:
+        self._save("startup/privileged_launcher", checked)
+        self.lbl_launcher_warning.setVisible(not checked)
 
     def _reset(self) -> None:
         answer = QMessageBox.question(self, "Настройки", "Вернуть все настройки по умолчанию?")

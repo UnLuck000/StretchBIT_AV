@@ -90,7 +90,10 @@ def test_installer_does_not_overwrite_loaded_windivert():
     text = (ROOT / "installer.iss").read_text(encoding="utf-8")
     lines = [s for s in text.splitlines() if s.startswith("Source:")]
     main = next(s for s in lines if '"{#SourceDir}\\*"' in s)
-    assert 'Excludes: "\\app\\native\\windivert"' in main
+    excluded = main.split('Excludes: "', 1)[1].split('"', 1)[0].split(",")
+    assert "\\app\\native\\windivert" in excluded
+    assert "\\app\\install-mode.json" in excluded
+    assert "\\archive-files.json" in excluded and "\\archive-ready.json" in excluded
     driver = next(s for s in lines if "windivert" in s and s is not main)
     assert "ignoreversion" not in driver
     assert all(f in driver for f in ("restartreplace", "uninsrestartdelete",

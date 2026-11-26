@@ -26,6 +26,7 @@ LEGACY_EXPLORER_KEY = r"Software\Classes\*\shell\StudyAV"  # пункт меню
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULTS = {
+    "startup/privileged_launcher": True,
     "startup/autostart": False,     # автозапуск всей программы (задание входа: по умолчанию
                                     # только возврат сети после VPN — --recover-network)
     "advanced/warned": False,       # предупреждение при первом открытии доп. настроек уже было

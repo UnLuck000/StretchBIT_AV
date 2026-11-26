@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import appinfo  # noqa: E402
 
 datas = [
+    (str(ROOT / "archive_stage.ps1"), "."),
     (str(ROOT / "LICENSE"), "."),
     (str(ROOT / "docs" / "EULA.txt"), "docs"),
     (str(ROOT / "docs" / "PRIVACY.txt"), "docs"),

@@ -95,6 +95,9 @@ class ServiceClient:
         if not pid or not self.verify_server(pid):
             winapi.close(h)
             raise ServiceUnavailable(f"канал {self.name} создан не службой (PID {pid})")
+        if self.name.startswith(r"\\.\pipe\sbit-archive-") and winapi.handle_owner_sid(h) != "S-1-5-18":
+            winapi.close(h)
+            raise ServiceUnavailable("Архивный launcher не принадлежит SYSTEM")
         self._h = h
 
     def close(self) -> None:
@@ -223,6 +226,19 @@ def connect(verify_server=None) -> ServiceClient | None:
     """Служба установлена, запущена и отвечает — клиент; иначе None (работа без службы)."""
     if not winapi.available():
         return None
+    if getattr(sys, "frozen", False):
+        import deployment
+        if not deployment.installed_with_service():
+            if not deployment.ready():
+                return None
+            import archive_runtime
+            client = ServiceClient(deployment.pipe_name(), verify_server or archive_runtime.server_check)
+            try:
+                client.call("hello", timeout=3.0, protocol=protocol.PROTOCOL)
+                return client
+            except ServiceError:
+                client.close()
+                return None
     if not protocol.dev_mode():
         if not getattr(sys, "frozen", False):
             return None  # из исходников — только с ядром в консоли (STRETCHBIT_SERVICE_DEV=1)

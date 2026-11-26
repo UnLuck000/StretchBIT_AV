@@ -62,6 +62,10 @@ OPS = {
     "vpn.status": READ,
     "vpn.counters": READ,
     "vpn.release_block": CONTROL,
+    # Разрешение задаёт только администратор установки, не настройка GUI.
+    "launcher.status": READ,
+    "launcher.open": CONTROL,
+    "launcher.policy": ADMIN,
 }
 
 # исключения, которые проходят через канал как есть (остальные — ServiceError)

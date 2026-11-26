@@ -13,7 +13,9 @@
     <widget class="QGroupBox" name="groupStartup">
      <property name="title"><string>Запуск</string></property>
      <layout class="QVBoxLayout" name="layoutStartup">
-      <item><widget class="QCheckBox" name="chkAutostart"><property name="toolTip"><string>Задание планировщика Windows при входе в систему, с наивысшими правами: программа запускается от администратора без окна UAC. Создать или убрать задание можно только из программы, запущенной от администратора.</string></property><property name="text"><string>Запускать вместе с Windows (с правами администратора)</string></property></widget></item>
+       <item><widget class="QCheckBox" name="chkAutostart"><property name="toolTip"><string>Пользовательский GUI запускается при входе в Windows; права службы и launcher не передаются окну.</string></property><property name="text"><string>Запускать окно программы вместе с Windows</string></property></widget></item>
+       <item><widget class="QCheckBox" name="chkPrivilegedLauncher"><property name="text"><string>Использовать привилегированный launcher, разрешённый администратором</string></property><property name="toolTip"><string>Известные системные инструменты запускаются службой без повторного UAC. Настройка не выдаёт машинное разрешение и не повышает GUI.</string></property></widget></item>
+       <item><widget class="QLabel" name="lblLauncherWarning"><property name="wordWrap"><bool>true</bool></property><property name="text"><string>Без launcher для полного доступа к системным инструментам потребуется пароль администратора при их отдельном запуске. Защита файлов и TUN продолжают работать через службу.</string></property></widget></item>
      </layout>
     </widget>
    </item>

@@ -21,6 +21,7 @@ def test_names(monkeypatch, ed, own, other):
 
 
 def test_passive_only_in_frozen_build(monkeypatch):
+    monkeypatch.setattr("deployment.installed_with_service", lambda: True)
     monkeypatch.setattr(editions, "other_active", lambda: True)
     monkeypatch.delattr(sys, "frozen", raising=False)
     assert not editions.passive()           # из исходников окно — всегда своё
@@ -55,6 +56,7 @@ def test_activate(monkeypatch):
 
 
 def test_revive_own_only_when_other_is_gone(monkeypatch):
+    monkeypatch.setattr("deployment.installed_with_service", lambda: True)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "platform", "win32")
     activated = []

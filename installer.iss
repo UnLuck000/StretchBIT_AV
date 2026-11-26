@@ -35,6 +35,9 @@
 #ifndef LegalRevision
   #error "LegalRevision is required. Build with python build_release.py --installer."
 #endif
+#ifndef InstallModeFile
+  #error "InstallModeFile is required. Build with python build_release.py --installer."
+#endif
 #ifndef SourceDir
   #define SourceDir "dist\StretchBIT"
 #endif
@@ -120,6 +123,7 @@ Name: "ru"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "desktopicon"; Description: "Ярлык на рабочем столе"; GroupDescription: "Ярлыки:"
 Name: "startmenuicon"; Description: "Ярлык в меню «Пуск»"; GroupDescription: "Ярлыки:"
 Name: "autostart"; Description: "Запускать вместе с Windows"; GroupDescription: "Автозапуск:"; Flags: unchecked
+Name: "privilegedlauncher"; Description: "Автозапуск привилегированного launcher: разрешить пользователям системные инструменты через службу SYSTEM"; GroupDescription: "Права инструментов:"
 
 [Dirs]
 ; папки данных — только для программы с правами (запись пользователям не выдаётся)
@@ -133,7 +137,8 @@ Name: "{app}\app\diag"
 #endif
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\app\native\windivert"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\app\native\windivert,\app\install-mode.json,\archive-files.json,\archive-ready.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#InstallModeFile}"; DestDir: "{app}\app"; DestName: "install-mode.json"; Flags: ignoreversion
 ; WinDivert (сборка кладёт по умолчанию) — отдельно: драйвер WinDivert64.sys, загруженный из этой
 ; папки, держит файл, пока работает. Остановка службы не помогает, если к драйверу подключился
 ; zapret (winws.exe): он не грузит свою копию, а берёт уже загруженную. С ignoreversion
@@ -163,6 +168,8 @@ Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /reset /T /C /Q"; Flags: ru
 Filename: "{sys}\icacls.exe"; Parameters: """{app}"" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /C /Q"; Flags: runhidden
 ; служба защиты: создать или обновить (путь, автозапуск, перезапуск при сбое) и запустить
 Filename: "{app}\{#ExeName}"; Parameters: "--service-install"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Устанавливаю службу защиты..."
+Filename: "{app}\{#ExeName}"; Parameters: "--service-launcher-policy on"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: privilegedlauncher; StatusMsg: "Сохраняю разрешение привилегированного launcher..."
+Filename: "{app}\{#ExeName}"; Parameters: "--service-launcher-policy off"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; Tasks: not privilegedlauncher
 ; Прежнее общее задание запускало GUI с наивысшими правами под установившим администратором.
 ; Новые задания создаются отдельно для каждого пользователя без повышения прав.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN StretchBIT /F"; Flags: runhidden waituntilterminated
@@ -181,6 +188,7 @@ var
   WipeSettings: Boolean;
   OtherPage: TInputOptionWizardPage;
   OtherFound: Boolean;
+  LauncherHint: TNewStaticText;
 
 { прежний установщик (installer.py) писал запись «Приложения» под именем без _is1;
   версии до 1.0.0 ставились без прав администратора: их запись «Приложения» и ярлыки были
@@ -299,8 +307,34 @@ begin
     Result := RemoveBackslashUnlessRoot(Result);
 end;
 
+procedure UpdateLauncherHint(Sender: TObject);
+begin
+  if WizardIsTaskSelected('privilegedlauncher') then
+    LauncherHint.Caption := 'Вы делегируете пользователям доступ к системным инструментам от SYSTEM. ' +
+      'Это расширенные права, а не просто настройка автозапуска. GUI и личные VPN-профили остаются у пользователя.'
+  else
+    LauncherHint.Caption := 'Без launcher для полного доступа к системным инструментам потребуется ' +
+      'пароль администратора при их отдельном запуске. Защита файлов и TUN работают через службу.';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpSelectTasks then
+    UpdateLauncherHint(nil);
+end;
+
 procedure InitializeWizard();
 begin
+  WizardForm.TasksList.Height := WizardForm.TasksList.Height - ScaleY(65);
+  LauncherHint := TNewStaticText.Create(WizardForm);
+  LauncherHint.Parent := WizardForm.SelectTasksPage;
+  LauncherHint.Left := WizardForm.TasksList.Left;
+  LauncherHint.Top := WizardForm.TasksList.Top + WizardForm.TasksList.Height + ScaleY(8);
+  LauncherHint.Width := WizardForm.TasksList.Width;
+  LauncherHint.Height := ScaleY(55);
+  LauncherHint.AutoSize := False;
+  LauncherHint.WordWrap := True;
+  WizardForm.TasksList.OnClickCheck := @UpdateLauncherHint;
   OtherFound := RegKeyExists(HKLM64, '{#OtherUninstallKey}');
   OtherPage := CreateInputOptionPage(wpWelcome, 'Другая версия StretchBIT',
     'На компьютере уже установлена {#OtherName}',
